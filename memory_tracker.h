@@ -25,11 +25,9 @@
  * 5. 预警机制：内存使用过高时的回调通知
  * 6. 历史记录：保存一段时间的内存使用历史
  */
-class memory_tracker
+class MemoryTracker
 {
     Q_OBJECT
-public:
-    memory_tracker();
 
 public:
     /**
@@ -49,7 +47,7 @@ public:
             ,location(loc)
             ,thread_id(std::this_thread::get_id())
         {}
-    }
+    };
 
     /**
      * @brief 内存使用统计
@@ -102,15 +100,188 @@ public:
      * @brief 配置选项
      */
     struct Config{
-        bool enable_leadk_detection = true;         // 启用泄漏检测
-        bool enable_call_stack = false;             // 启用调用栈记录（性能影响较大）
-        bool enable_statistics = true;              // 启用统计功能
-        bool enable_history = true;                 // 启用历史记录
-        size_t max_allocations = 100000;            // 最大跟踪的分配数量
-        size_t alert_threshold = 100 * 1024 * 1024; // 预警阈值（100MB)
-        std::chrono::seconds history_interval{5};   // 历史记录间隔
-        size_t max_history_size = 1000;             // 最大历史记录数量
+        bool enable_leak_detection;         // 启用泄漏检测
+        bool enable_call_stack;             // 启用调用栈记录（性能影响较大）
+        bool enable_statistics;              // 启用统计功能
+        bool enable_history;                 // 启用历史记录
+        size_t max_allocations;            // 最大跟踪的分配数量
+        size_t alert_threshold; // 预警阈值（100MB)
+        std::chrono::seconds history_interval;   // 历史记录间隔
+        size_t max_history_size;             // 最大历史记录数量
+
+        Config()
+            :enable_leak_detection(true)
+            ,enable_call_stack(false)
+            ,enable_statistics(true)
+            ,enable_history(true)
+            ,max_allocations(100000)
+            ,alert_threshold(100 * 1024 * 1024)
+            ,history_interval(5)
+            ,max_history_size(1000)
+        {}
     };
+
+public:
+    explicit MemoryTracker(const Config& config = Config{});
+    ~MemoryTracker();
+
+    MemoryTracker(const MemoryTracker&) = delete;
+    MemoryTracker& operator=(const MemoryTracker&) = delete;
+
+public:
+    /**
+     * @brief 记录内存分配
+     * @param ptr 分配的内存指针
+     * @param size 分配的字节数
+     * @param location 分配位置（通常是文件名:行号）
+     */
+    void recordAllocation(void* ptr,size_t size, const std::string& location = "");
+
+    /**
+     * @brief 记录内存释放
+     * @param ptr 释放的内存指针
+     * @return true表示成功找到并移除分配记录
+     */
+    bool recordDeallocation(void* ptr);
+
+    /**
+     * @brief 获取当前统计信息
+     * @return 统计信息的拷贝
+     */
+    Statistics getStatistics() const { return stats_; }
+
+    /**
+     * @brief 检测内存泄漏
+     * @return 泄漏的分配信息列表
+     */
+    std::vector<AllocationInfo> detectLeaks() const;
+
+    /**
+     * @brief 获取大小分布统计
+     * @return 各个大小范围的分配次数
+     */
+    std::unordered_map<std::string, size_t> getSizeDistribution() const;
+
+    /**
+     * @brief 获取热点分析
+     * @param top_n 返回前N个热点
+     * @return 分配次数最多的位置
+     */
+    std::vector<Snapshot> getHistory() const;
+
+    /**
+    /**
+     * @brief 生成性能报告的CSV数据
+     * @return CSV格式的历史数据，可用于图表生成
+     */
+    std::string generateCSVData() const;
+
+    /**
+     * @brief 设置预警回调
+     * @param callback 当内存使用超过阈值时的回调函数
+     */
+    void setAlertCallback(AlertCallback callback);
+
+    /**
+     * @brief 重置所有统计信息
+     */
+    void reset();
+
+    /**
+     * @brief 开始/停止历史记录
+     */
+    void startHistoryRecording();
+    void stopHistoryRecording();
+
+    /**
+     * @brief 手动触发快照
+     */
+    void takeSnapshot();
+
+    /**
+     * @brief 检查是否健康（无泄漏、使用量正常）
+     */
+    bool isHealthy() const;
+
+private:
+    /**
+     * @brief 历史记录线程函数
+     */
+    void historyRecordingThread();
+
+    /**
+     * @brief 检查并触发预警
+     */
+    void checkAndAlert(size_t current_usage);
+
+    /**
+     * @brief 清理过期的历史记录
+     */
+    void cleanupHistory();
+
+    /**
+     * @brief 分析分配大小并归类
+     */
+    std::string categorizeSize(size_t size) const;
+
+private:
+    Config config_;                         // 配置选项
+    mutable Statistics stats_;              // 统计信息
+
+    // 分配跟踪（仅在启用泄露检测时使用）
+    mutable std::mutex allocations_mutex_;
+    std::unordered_map<void*, AllocationInfo> active_allocations_;
+
+    // 热点统计
+    mutable std::mutex hotspots_mutex_;
+    std::unordered_map<std::string, size_t> allocation_hotspots_;
+
+    // 历史记录
+    mutable std::mutex history_mutex_;
+    std::vector<Snapshot> history_;
+    std::thread history_thread_;
+    std::atomic<bool> recording_history_{false};
+    std::condition_variable history_cv_;
+
+    // 预警系统
+    AlertCallback alert_callback_;
+    std::atomic<bool> alert_triggered_{false};
+
+    // 生命周期管理
+    std::atomic<bool> shutdown_{false};
+};
+
+#define MEMORY_TRACK_ALLOC(tracker, ptr, size) \
+    do{ \
+        if(tracker){ \
+            tracker->recordAllocation(ptr, size, __FILE__":" std::to_string(__LINE__)); \
+        }\
+    }while(0)
+
+#define MEMORY_TRACK_FREE(tracker, ptr) \
+    do{ \
+        if(tracker){ \
+            tracker->recordDeallocation(ptr); \
+        } \
+    }while(0)
+
+/**
+ * @brief 全局内存跟踪器实例
+ * 提供单例访问模式
+ */
+class GlobalMemoryTracker{
+public:
+    static MemoryTracker& getInstance(){
+        static MemoryTracker instance;
+        return instance;
+    }
+
+    static void configureGlobal(const MemoryTracker::Config& config){
+        getInstance() = MemoryTracker(config);
+    }
+
+private:
+    GlobalMemoryTracker() = default;
 };
 
 #endif // MEMORY_TRACKER_H

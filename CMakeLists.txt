@@ -96,6 +96,16 @@ else()
         add_executable(Project_Disassembly
             ${PROJECT_SOURCES}
             ${MEMORY_MANAGEMENT_SOURCES}
+            cache_manager.cpp
+            cache_manager.h
+            frame_allocator.cpp
+            frame_allocator.h
+            memory_manager.cpp
+            memory_manager.h
+            object_pool.cpp
+            object_pool.h
+            packet_recycler.cpp
+            packet_recycler.h
         )
     endif()
 endif()

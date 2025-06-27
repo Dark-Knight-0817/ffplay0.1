@@ -170,7 +170,7 @@ public:
     }
 
     /**
-     * @brief 创建SwsContext智能指针
+     * @brief 创建SwsContext智能指针，SWS = Software Scale,软件缩放
      * @param srcW 源宽度
      * @param srcH 源高度
      * @param srcFormat 源像素格式
@@ -190,7 +190,7 @@ public:
     }
 
     /**
-     * @brief 创建SwrContext智能指针（FFmpeg 7.x新API）
+     * @brief 创建SwrContext智能指针（FFmpeg 7.x新API），Swr = Software Resample软件重采样
      * @param out_ch_layout 输出声道布局
      * @param out_sample_fmt 输出采样格式
      * @param out_sample_rate 输出采样率

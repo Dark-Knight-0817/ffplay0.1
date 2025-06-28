@@ -194,7 +194,7 @@ std::unique_ptr<ObjectPool<std::vector<uint8_t>>> createBufferPool(
 // 全局对象池管理器的实现
 class GlobalObjectPoolManager {
 private:
-    std::mutex pools_mutex_;
+    mutable std::mutex pools_mutex_;
     std::unordered_map<std::string, std::shared_ptr<void>> pools_;
 
 public:

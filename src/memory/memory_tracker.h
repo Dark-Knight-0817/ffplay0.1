@@ -27,7 +27,6 @@
  */
 class MemoryTracker
 {
-    Q_OBJECT
 
 public:
     /**
@@ -49,10 +48,30 @@ public:
         {}
     };
 
+    struct StatisticsSnapshot {
+        size_t total_allocated;             // 累计分配字节数
+        size_t total_freed;                 // 累计释放字节数
+        size_t current_usage;               // 当前使用量
+        size_t peak_usage;                  // 峰值使用量
+        size_t allocation_count;            // 分配次数
+        size_t free_count;                  // 释放次数
+        size_t leak_count;                  // 泄漏次数
+
+        // 计算平均分配大小
+        double getAverageAllocationSize() const {
+            return allocation_count > 0 ? static_cast<double>(total_allocated) / allocation_count : 0.0;
+        }
+
+        // 计算内存效率（释放率）
+        double getMemoryEfficiency() const {
+            return total_allocated > 0 ? static_cast<double>(total_freed) / total_allocated : 0.0;
+        }
+    };
+
     /**
-     * @brief 内存使用统计
-     */
-    struct Statistics{
+ * @brief 内存使用统计（内部使用，带原子操作）
+ */
+    struct Statistics {
         std::atomic<size_t> total_allocated{0};             // 累计分配字节数
         std::atomic<size_t> total_freed{0};                 // 累计释放字节数
         std::atomic<size_t> current_usage{0};               // 当前使用量
@@ -61,16 +80,17 @@ public:
         std::atomic<size_t> free_count{0};                  // 释放次数
         std::atomic<size_t> leak_count{0};                  // 泄漏次数
 
-        // 计算平均分配大小
-        double getAverageAllocationSize() const{
-            size_t count = allocation_count.load();
-            return count > 0 ? static_cast<double> (total_allocated.load()) / count : 0.0;
-        }
-
-        // 计算内存效率（释放率）
-        double getMemoryEfficiency() const{
-            size_t allocated = total_allocated.load();
-            return allocated > 0 ? static_cast<double>(total_freed.load()) / allocated : 0.0;
+        // 转换为快照
+        StatisticsSnapshot getSnapshot() const {
+            return StatisticsSnapshot{
+                total_allocated.load(),
+                total_freed.load(),
+                current_usage.load(),
+                peak_usage.load(),
+                allocation_count.load(),
+                free_count.load(),
+                leak_count.load()
+            };
         }
     };
 
@@ -148,7 +168,7 @@ public:
      * @brief 获取当前统计信息
      * @return 统计信息的拷贝
      */
-    Statistics getStatistics() const { return stats_; }
+    StatisticsSnapshot getStatistics() const { return stats_.getSnapshot(); }
 
     /**
      * @brief 检测内存泄漏
@@ -168,6 +188,15 @@ public:
      * @return 分配次数最多的位置
      */
     std::vector<Snapshot> getHistory() const;
+
+    /**
+     * @brief 获取热点分析
+     * @param top_n 返回前N个热点
+     * @return 分配次数最多的位置
+     */
+    std::vector<std::pair<std::string, size_t>> getHotspots(size_t top_n = 10) const;
+
+    std::string generateReport() const;
 
     /**
     /**
@@ -276,8 +305,9 @@ public:
         return instance;
     }
 
-    static void configureGlobal(const MemoryTracker::Config& config){
-        getInstance() = MemoryTracker(config);
+    static void configureGlobal(const MemoryTracker::Config& config) {
+        static std::unique_ptr<MemoryTracker> instance_ptr;
+        instance_ptr = std::make_unique<MemoryTracker>(config);
     }
 
 private:

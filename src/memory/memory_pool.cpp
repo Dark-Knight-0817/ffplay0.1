@@ -182,15 +182,15 @@ std::string MemoryPool::getReport() const
     std::ostringstream oss;
 
     oss << " === Memory Pool Report ===\n";
-    oss << "Current Usage: " << stats.current_usage.load() << " bytes\n";
-    oss << "Peak Usage: " << stats.peak_usage.load() << " bytes\n";
-    oss << "Total Allocated: " << stats.total_allocated.load() << " bytes\n";
-    oss << "Total Freed: " << stats.total_freed.load() << " bytes\n";
-    oss << "Allocation Count: " << stats.allocation_count.load() << "\n";
-    oss << "Free Count: " << stats.free_count.load() << "\n";
+    oss << "Current Usage: " << stats.current_usage << " bytes\n";
+    oss << "Peak Usage: " << stats.peak_usage << " bytes\n";
+    oss << "Total Allocated: " << stats.total_allocated << " bytes\n";
+    oss << "Total Freed: " << stats.total_freed << " bytes\n";
+    oss << "Allocation Count: " << stats.allocation_count << "\n";
+    oss << "Free Count: " << stats.free_count << "\n";
     oss << "Pool Hit Rate: " << std::fixed << std::setprecision(2) << (stats.getHitRate() * 100) << "%\n";
     oss << "Fragmentation Rate: " << std::fixed << std::setprecision(2) << (stats.getFragmentationRate() * 100 ) << "%\n";
-    oss << "System Allocations: " << stats.system_alloc_count.load() << "\n";
+    oss << "System Allocations: " << stats.system_alloc_count << "\n";
 
     return oss.str();
 }

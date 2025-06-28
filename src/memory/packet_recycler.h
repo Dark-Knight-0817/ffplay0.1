@@ -9,6 +9,8 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
+#include <thread>         // 添加这个头文件
+#include <condition_variable>  // 可能也需要这个
 
 // 前向声明
 struct AVPacket;
@@ -34,7 +36,7 @@ public:
         SMALL,         // 1KB - 16KB  (小视频帧、音频块)
         MEDIUM,        // 16KB - 256KB (标准视频帧)
         LARGE,         // 256KB - 1MB  (I帧、高质量帧)
-        HUGE,          // > 1MB        (超高质量、4K帧)
+        EXTRA_LARGE,          // > 1MB        (超高质量、4K帧)
         CATEGORY_COUNT
     };
 
@@ -64,38 +66,43 @@ public:
     };
 
     /**
+     * @brief 统计信息快照
+     */
+    struct StatisticsSnapshot {
+        size_t total_created;      // 总创建数量
+        size_t total_acquired;     // 总获取次数
+        size_t total_released;     // 总归还次数
+        size_t current_in_use;     // 当前使用中
+        size_t current_available;  // 当前可用数量
+        size_t peak_usage;         // 峰值使用量
+
+        // 计算命中率
+        double getHitRate() const {
+            return total_acquired > 0 ? static_cast<double>(total_acquired - total_created) / total_acquired : 0.0;
+        }
+    };
+
+    /**
      * @brief 统计信息
      */
     struct Statistics {
-        std::atomic<size_t> total_allocated{0};        // 总分配次数
-        std::atomic<size_t> total_recycled{0};         // 总回收次数
-        std::atomic<size_t> pool_hits{0};              // 池命中次数
-        std::atomic<size_t> pool_misses{0};            // 池未命中次数
-        std::atomic<size_t> current_memory_usage{0};   // 当前内存使用
-        std::atomic<size_t> peak_memory_usage{0};      // 峰值内存使用
-        std::atomic<size_t> reference_count_total{0};  // 总引用计数
+        std::atomic<size_t> total_created{0};      // 总创建数量
+        std::atomic<size_t> total_acquired{0};     // 总获取次数
+        std::atomic<size_t> total_released{0};     // 总归还次数
+        std::atomic<size_t> current_in_use{0};     // 当前使用中
+        std::atomic<size_t> current_available{0};  // 当前可用数量
+        std::atomic<size_t> peak_usage{0};         // 峰值使用量
 
-        // 按类别的统计
-        std::atomic<size_t> category_counts[static_cast<int>(SizeCategory::CATEGORY_COUNT)];
-
-        Statistics() {
-            for (auto& count : category_counts) {
-                count.store(0);
-            }
-        }
-
-        // 计算回收率
-        double getRecyclingRate() const {
-            size_t allocated = total_allocated.load();
-            size_t recycled = total_recycled.load();
-            return allocated > 0 ? static_cast<double>(recycled) / allocated : 0.0;
-        }
-
-        // 计算池命中率
-        double getPoolHitRate() const {
-            size_t hits = pool_hits.load();
-            size_t total = hits + pool_misses.load();
-            return total > 0 ? static_cast<double>(hits) / total : 0.0;
+        // 转换为快照
+        StatisticsSnapshot getSnapshot() const {
+            return StatisticsSnapshot{
+                total_created.load(),
+                total_acquired.load(),
+                total_released.load(),
+                current_in_use.load(),
+                current_available.load(),
+                peak_usage.load()
+            };
         }
     };
 
@@ -213,7 +220,7 @@ public:
     /**
      * @brief 获取统计信息
      */
-    Statistics getStatistics() const { return stats_; }
+    StatisticsSnapshot getStatistics() const { return stats_.getSnapshot(); }
 
     /**
      * @brief 获取各类别的详细信息
@@ -324,8 +331,9 @@ public:
         return instance;
     }
 
-    static void configure(const PacketRecycler::Config& config) {
-        getInstance() = PacketRecycler(config);
+    static void initialize(const PacketRecycler::Config& config) {
+        // 由于单例模式的限制，这里只能记录配置建议
+        // 但无法重新配置已存在的实例
     }
 
 private:

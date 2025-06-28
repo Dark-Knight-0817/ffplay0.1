@@ -154,7 +154,7 @@ CacheManager<Key, Value>::SingleLevelCache::evictLeastUsed(size_t count) {
 
     for (size_t i = 0; i < count && !cache_map_.empty(); ++i) {
         auto evicted_pair = evictOne();
-        if (!evicted_pair.first.empty()) {
+        if (evicted_pair.second != nullptr) {
             evicted.push_back(evicted_pair);
         }
     }
@@ -219,62 +219,62 @@ CacheManager<Key, Value>::SingleLevelCache::evictOne() {
 
     Key evict_key{};
 
-    switch (policy_) {
-    case EvictionPolicy::LRU: {
-        if (!lru_list_.empty()) {
-            evict_key = lru_list_.back();
-            lru_list_.pop_back();
-            lru_map_.erase(evict_key);
-        }
-        break;
-    }
-    case EvictionPolicy::LFU: {
-        if (!frequency_lists_[min_frequency_].empty()) {
-            evict_key = frequency_lists_[min_frequency_].back();
-            frequency_lists_[min_frequency_].pop_back();
-            frequency_map_.erase(evict_key);
-        }
-        break;
-    }
-    case EvictionPolicy::FIFO: {
-        if (!lru_list_.empty()) {
-            evict_key = lru_list_.back();
-            lru_list_.pop_back();
-            lru_map_.erase(evict_key);
-        }
-        break;
-    }
-    case EvictionPolicy::RANDOM: {
-        if (!cache_map_.empty()) {
-            static std::random_device rd;
-            static std::mt19937 gen(rd());
-            std::uniform_int_distribution<> dis(0, cache_map_.size() - 1);
+    // switch (policy_) {
+    // case EvictionPolicy::LRU: {
+    //     if (!lru_list_.empty()) {
+    //         evict_key = lru_list_.back();
+    //         lru_list_.pop_back();
+    //         lru_map_.erase(evict_key);
+    //     }
+    //     break;
+    // }
+    // case EvictionPolicy::LFU: {
+    //     if (!frequency_lists_[min_frequency_].empty()) {
+    //         evict_key = frequency_lists_[min_frequency_].back();
+    //         frequency_lists_[min_frequency_].pop_back();
+    //         frequency_map_.erase(evict_key);
+    //     }
+    //     break;
+    // }
+    // case EvictionPolicy::FIFO: {
+    //     if (!lru_list_.empty()) {
+    //         evict_key = lru_list_.back();
+    //         lru_list_.pop_back();
+    //         lru_map_.erase(evict_key);
+    //     }
+    //     break;
+    // }
+    // case EvictionPolicy::RANDOM: {
+    //     if (!cache_map_.empty()) {
+    //         static std::random_device rd;
+    //         static std::mt19937 gen(rd());
+    //         std::uniform_int_distribution<> dis(0, cache_map_.size() - 1);
 
-            auto it = cache_map_.begin();
-            std::advance(it, dis(gen));
-            evict_key = it->first;
-        }
-        break;
-    }
-    case EvictionPolicy::TTL: {
-        // 基于时间的淘汰
-        auto now = std::chrono::steady_clock::now();
-        auto oldest_time = now;
+    //         auto it = cache_map_.begin();
+    //         std::advance(it, dis(gen));
+    //         evict_key = it->first;
+    //     }
+    //     break;
+    // }
+    // case EvictionPolicy::TTL: {
+    //     // 基于时间的淘汰
+    //     auto now = std::chrono::steady_clock::now();
+    //     auto oldest_time = now;
 
-        for (const auto& pair : cache_map_) {
-            if (pair.second->created_time < oldest_time) {
-                oldest_time = pair.second->created_time;
-                evict_key = pair.first;
-            }
-        }
-        break;
-    }
-    default:
-        if (!cache_map_.empty()) {
-            evict_key = cache_map_.begin()->first;
-        }
-        break;
-    }
+    //     for (const auto& pair : cache_map_) {
+    //         if (pair.second->created_time < oldest_time) {
+    //             oldest_time = pair.second->created_time;
+    //             evict_key = pair.first;
+    //         }
+    //     }
+    //     break;
+    // }
+    // default:
+    //     if (!cache_map_.empty()) {
+    //         evict_key = cache_map_.begin()->first;
+    //     }
+    //     break;
+    // }
 
     auto entry = cache_map_[evict_key];
     cache_map_.erase(evict_key);
@@ -413,7 +413,7 @@ void CacheManager<Key, Value>::prefetch(const std::vector<Key>& keys,
 template<typename Key, typename Value>
 std::pair<std::shared_ptr<typename CacheManager<Key, Value>::CacheEntry>,
           typename CacheManager<Key, Value>::CacheLevel>
-CacheManager<Key, Value>::findEntry(const Key& key) {
+CacheManager<Key, Value>::findEntry(const Key& key) const {
     // 按L1 -> L2 -> L3的顺序查找
     auto entry = l1_cache_->get(key);
     if (entry) {
@@ -518,13 +518,13 @@ std::string CacheManager<Key, Value>::generateReport() const {
     oss << "Hit Rates: L1=" << std::fixed << std::setprecision(2)
         << (stats.getL1HitRate() * 100) << "%, Total="
         << (stats.getTotalHitRate() * 100) << "%\n";
-    oss << "Total Hits: L1=" << stats.l1_hits.load()
-        << ", L2=" << stats.l2_hits.load()
-        << ", L3=" << stats.l3_hits.load() << "\n";
-    oss << "Misses: " << stats.misses.load() << "\n";
-    oss << "Evictions: " << stats.evictions.load() << "\n";
-    oss << "Promotions: " << stats.promotions.load() << "\n";
-    oss << "Demotions: " << stats.demotions.load() << "\n";
+    oss << "Total Hits: L1=" << stats.l1_hits
+        << ", L2=" << stats.l2_hits
+        << ", L3=" << stats.l3_hits << "\n";
+    oss << "Misses: " << stats.misses << "\n";
+    oss << "Evictions: " << stats.evictions << "\n";
+    oss << "Promotions: " << stats.promotions << "\n";
+    oss << "Demotions: " << stats.demotions << "\n";
 
     if (config_.enable_prefetch) {
         oss << "Prefetch Efficiency: " << std::fixed << std::setprecision(2)

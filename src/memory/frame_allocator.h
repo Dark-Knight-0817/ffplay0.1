@@ -7,10 +7,11 @@
 #include <mutex>
 #include <atomic>
 #include <string>
+#include <functional>
 
 // 前向声明，避免循环依赖
 struct AVFrame;
-enum AVPixelFormat : int;
+
 
 /**
  * @brief 视频帧专用内存分配器
@@ -47,6 +48,19 @@ public:
     };
 
     /**
+     * @brief 自定义hash函数
+     */
+    struct FrameSpecHash {
+        size_t operator()(const FrameSpec& spec) const {
+            size_t h1 = std::hash<int>{}(spec.width);
+            size_t h2 = std::hash<int>{}(spec.height);
+            size_t h3 = std::hash<int>{}(spec.pixel_format);
+            size_t h4 = std::hash<int>{}(spec.alignment);
+            return h1 ^ (h2 << 1) ^ (h3 << 2) ^ (h4 << 3);
+        }
+    };
+
+    /**
      * @brief 分配器配置
      */
     struct Config {
@@ -68,6 +82,30 @@ public:
     };
 
     /**
+     * @brief 分配统计信息快照（非原子版本，用于返回）
+     */
+    struct StatisticsSnapshot {
+        size_t total_allocated;        // 总分配次数
+        size_t total_freed;            // 总释放次数
+        size_t pool_hits;              // 池命中次数
+        size_t pool_misses;            // 池未命中次数
+        size_t active_pools;           // 活跃池数量
+        size_t total_memory_usage;     // 总内存使用量
+        size_t peak_memory_usage;      // 峰值内存使用量
+
+        // 计算池命中率
+        double getHitRate() const {
+            size_t total = pool_hits + pool_misses;
+            return total > 0 ? static_cast<double>(pool_hits) / total : 0.0;
+        }
+
+        // 计算内存效率
+        double getMemoryEfficiency() const {
+            return peak_memory_usage > 0 ? static_cast<double>(total_memory_usage) / peak_memory_usage : 0.0;
+        }
+    };
+
+    /**
      * @brief 分配统计信息
      */
     struct Statistics {
@@ -79,17 +117,17 @@ public:
         std::atomic<size_t> total_memory_usage{0};     // 总内存使用量
         std::atomic<size_t> peak_memory_usage{0};      // 峰值内存使用量
 
-        // 计算池命中率
-        double getHitRate() const {
-            size_t total = pool_hits.load() + pool_misses.load();
-            return total > 0 ? static_cast<double>(pool_hits.load()) / total : 0.0;
-        }
-
-        // 计算内存效率
-        double getMemoryEfficiency() const {
-            size_t peak = peak_memory_usage.load();
-            size_t current = total_memory_usage.load();
-            return peak > 0 ? static_cast<double>(current) / peak : 0.0;
+        // 转换为快照
+        StatisticsSnapshot getSnapshot() const {
+            return StatisticsSnapshot{
+                total_allocated.load(),
+                total_freed.load(),
+                pool_hits.load(),
+                pool_misses.load(),
+                active_pools.load(),
+                total_memory_usage.load(),
+                peak_memory_usage.load()
+            };
         }
     };
 
@@ -124,6 +162,7 @@ private:
         // 统计信息
         size_t getTotalAllocated() const { return total_allocated_; }
         size_t getMemoryUsage() const;
+        AVFrame* createFrame();
 
     private:
         FrameSpec spec_;
@@ -132,7 +171,7 @@ private:
         mutable std::mutex mutex_;
         std::atomic<size_t> total_allocated_{0};
 
-        AVFrame* createFrame();
+
         void destroyFrame(AVFrame* frame);
         bool allocateBuffer(AVFrame* frame);
     };
@@ -180,7 +219,7 @@ public:
     /**
      * @brief 获取统计信息
      */
-    Statistics getStatistics() const { return stats_; }
+    StatisticsSnapshot getStatistics() const { return stats_.getSnapshot(); }
 
     /**
      * @brief 获取池信息
@@ -238,37 +277,12 @@ private:
     mutable Statistics stats_;                                         // 统计信息
 
     mutable std::mutex pools_mutex_;                                   // 池容器访问锁
-    std::unordered_map<FrameSpec, std::shared_ptr<FramePool>> pools_; // 帧池映射
+    std::unordered_map<FrameSpec, std::shared_ptr<FramePool>, FrameSpecHash> pools_; // 帧池映射
 
     std::function<void(size_t, size_t)> memory_pressure_callback_;     // 内存压力回调
 
     std::atomic<bool> shutdown_{false};                               // 关闭标志
 };
-
-/**
- * @brief FrameSpec的哈希函数
- */
-struct FrameSpecHash {
-    size_t operator()(const FrameAllocator::FrameSpec& spec) const {
-        size_t h1 = std::hash<int>{}(spec.width);
-        size_t h2 = std::hash<int>{}(spec.height);
-        size_t h3 = std::hash<int>{}(spec.pixel_format);
-        size_t h4 = std::hash<int>{}(spec.alignment);
-        return h1 ^ (h2 << 1) ^ (h3 << 2) ^ (h4 << 3);
-    }
-};
-
-} // namespace std
-
-// 为unordered_map提供FrameSpec的哈希支持
-namespace std {
-template<>
-struct hash<FrameAllocator::FrameSpec> {
-    size_t operator()(const FrameAllocator::FrameSpec& spec) const {
-        return FrameSpecHash{}(spec);
-    }
-};
-}
 
 /**
  * @brief 全局帧分配器实例
@@ -281,8 +295,9 @@ public:
         return instance;
     }
 
-    static void configure(const FrameAllocator::Config& config) {
-        getInstance() = FrameAllocator(config);
+    static void initialize(const FrameAllocator::Config& config) {
+        // 由于单例模式的限制，这里只能记录配置建议
+        // 但无法重新配置已存在的实例
     }
 
 private:

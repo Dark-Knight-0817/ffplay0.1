@@ -23,7 +23,6 @@
 
 class MemoryPool
 {
-    Q_OBJECT
 
 public:
     // 内存池配置
@@ -47,6 +46,28 @@ public:
         {}
     };
 
+    // 首先，创建一个用于返回的非原子版本的统计信息
+    struct StatisticsSnapshot {
+        size_t total_allocated;         // 总分配字节数
+        size_t total_freed;             // 总释放字节数
+        size_t current_usage;           // 当前使用量
+        size_t peak_usage;              // 峰值使用量
+        size_t allocation_count;        // 分配次数
+        size_t free_count;              // 释放次数
+        size_t pool_hit_count;          // 池命中次数
+        size_t system_alloc_count;      // 系统分配次数
+
+        // 计算命中率
+        double getHitRate() const {
+            return allocation_count > 0 ? static_cast<double>(pool_hit_count) / allocation_count : 0.0;
+        }
+
+        // 计算碎片率
+        double getFragmentationRate() const {
+            return peak_usage > 0 ? 1.0 - static_cast<double>(current_usage) / peak_usage : 0.0;
+        }
+    };
+
     // 内存统计信息
     struct Statistics{
         std::atomic<size_t> total_allocated{0};         // 总分配字节数
@@ -58,17 +79,18 @@ public:
         std::atomic<size_t> pool_hit_count{0};          // 池命中次数
         std::atomic<size_t> system_alloc_count{0};      // 系统分配次数
 
-        // 计算命中率
-        double getHitRate() const{
-            size_t total = allocation_count.load();
-            return total > 0 ? static_cast<double>(pool_hit_count.load()) / total : 0.0;
-        }
-
-        // 计算碎片率(why?)
-        double getFragmentationRate() const{
-            size_t current = current_usage.load();
-            size_t peak = peak_usage.load();
-            return peak > 0 ? 1.0 - static_cast<double>(current) / peak : 0.0;
+        // 转换为快照
+        StatisticsSnapshot getSnapshot() const {
+            return StatisticsSnapshot{
+                total_allocated.load(),
+                total_freed.load(),
+                current_usage.load(),
+                peak_usage.load(),
+                allocation_count.load(),
+                free_count.load(),
+                pool_hit_count.load(),
+                system_alloc_count.load()
+            };
         }
     };
 
@@ -143,7 +165,9 @@ public:
      * @brief 获取统计信息
      * @return 统计信息的拷贝
      */
-    Statistics getStatistics() const { return stats_; }
+    StatisticsSnapshot getStatistics() const {
+        return stats_.getSnapshot();
+    }
 
     /**
      * @brief 重置统计信息

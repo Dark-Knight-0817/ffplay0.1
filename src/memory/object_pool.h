@@ -8,6 +8,7 @@
 #include <functional>
 #include <atomic>
 #include <condition_variable>
+#include <type_traits>
 
 /**
  * @brief 高性能泛型对象池
@@ -42,7 +43,24 @@ public:
     };
 
     /**
-     * @brief 统计信息
+     * @brief 统计信息快照（非原子版本，用于返回）
+     */
+    struct StatisticsSnapshot {
+        size_t total_created;      // 总创建数量
+        size_t total_acquired;     // 总获取次数
+        size_t total_released;     // 总归还次数
+        size_t current_in_use;     // 当前使用中
+        size_t current_available;  // 当前可用数量
+        size_t peak_usage;         // 峰值使用量
+
+        // 计算命中率
+        double getHitRate() const {
+            return total_acquired > 0 ? static_cast<double>(total_acquired - total_created) / total_acquired : 0.0;
+        }
+    };
+
+    /**
+     * @brief 统计信息（内部使用，带原子操作）
      */
     struct Statistics {
         std::atomic<size_t> total_created{0};      // 总创建数量
@@ -52,11 +70,16 @@ public:
         std::atomic<size_t> current_available{0};  // 当前可用数量
         std::atomic<size_t> peak_usage{0};         // 峰值使用量
 
-        // 计算命中率
-        double getHitRate() const {
-            size_t acquired = total_acquired.load();
-            size_t created = total_created.load();
-            return acquired > 0 ? static_cast<double>(acquired - created) / acquired : 0.0;
+        // 转换为快照
+        StatisticsSnapshot getSnapshot() const {
+            StatisticsSnapshot snapshot;
+            snapshot.total_created = total_created.load();
+            snapshot.total_acquired = total_acquired.load();
+            snapshot.total_released = total_released.load();
+            snapshot.current_in_use = current_in_use.load();
+            snapshot.current_available = current_available.load();
+            snapshot.peak_usage = peak_usage.load();
+            return snapshot;
         }
     };
 
@@ -109,6 +132,33 @@ public:
 
     using PooledPtr = std::unique_ptr<PooledObject>;
 
+private:
+    // SFINAE helper for detecting reset method
+    template<typename U>
+    struct has_reset {
+        template<typename V>
+        static auto test(int) -> decltype(std::declval<V>().reset(), std::true_type{});
+
+        template<typename>
+        static std::false_type test(...);
+
+        using type = decltype(test<U>(0));
+        static constexpr bool value = type::value;
+    };
+
+    // Helper function for calling reset when available
+    template<typename U>
+    typename std::enable_if<has_reset<U>::value>::type
+    call_reset_if_available(U* obj) {
+        obj->reset();
+    }
+
+    template<typename U>
+    typename std::enable_if<!has_reset<U>::value>::type
+    call_reset_if_available(U* obj) {
+        // Do nothing if reset method doesn't exist
+    }
+
 public:
     /**
      * @brief 构造函数
@@ -134,7 +184,7 @@ public:
     /**
      * @brief 获取统计信息
      */
-    Statistics getStatistics() const { return stats_; }
+    StatisticsSnapshot getStatistics() const { return stats_.getSnapshot(); }
 
     /**
      * @brief 获取当前可用对象数量
@@ -209,13 +259,12 @@ private:
 template<typename T>
 ObjectPool<T>::ObjectPool(const Config& config) : config_(config) {
     // 设置默认工厂函数
-    factory_ = []() { return std::make_unique<T>(); };
+    factory_ = []() { return std::unique_ptr<T>(new T()); };
 
-    // 设置默认重置函数
-    reset_function_ = [](T* obj) {
-        // 尝试调用对象的reset方法
-        if constexpr (requires { obj->reset(); }) {
-            obj->reset();
+    // 设置默认重置函数 - 使用SFINAE检测reset方法
+    reset_function_ = [this](T* obj) {
+        if (obj) {
+            call_reset_if_available(obj);
         }
     };
 
@@ -232,7 +281,7 @@ ObjectPool<T>::~ObjectPool() {
 template<typename T>
 typename ObjectPool<T>::PooledPtr ObjectPool<T>::acquire() {
     if (shutdown_.load()) {
-        return nullptr;
+        return PooledPtr(nullptr);
     }
 
     std::unique_ptr<T> obj;
@@ -254,7 +303,7 @@ typename ObjectPool<T>::PooledPtr ObjectPool<T>::acquire() {
             stats_.current_in_use.load() < config_.max_size) {
             obj = createObject();
         } else {
-            return nullptr; // 达到最大限制
+            return PooledPtr(nullptr); // 达到最大限制
         }
     }
 
@@ -271,7 +320,7 @@ typename ObjectPool<T>::PooledPtr ObjectPool<T>::acquire() {
         }
     }
 
-    return std::make_unique<PooledObject>(std::move(obj), this);
+    return PooledPtr(new PooledObject(std::move(obj), this));
 }
 
 template<typename T>

@@ -95,33 +95,19 @@ public:
      * @brief 全局内存统计
      */
     struct GlobalStatistics {
-        size_t total_allocated_memory;
-        size_t total_used_memory;
-        size_t peak_memory_usage;
+        MemoryPool::StatisticsSnapshot pool_stats;      // 改为使用 Snapshot 版本
+        MemoryTracker::StatisticsSnapshot tracker_stats; // 改为使用 Snapshot 版本
+        FrameAllocator::StatisticsSnapshot frame_stats;  // 改为使用 Snapshot 版本
+        PacketRecycler::StatisticsSnapshot packet_stats; // 改为使用 Snapshot 版本
+
+        size_t total_memory_usage;
+        size_t total_objects;
         double overall_efficiency;
-        double fragmentation_rate;
-
-        // 各组件统计
-        MemoryPool::Statistics pool_stats;
-        MemoryTracker::Statistics tracker_stats;
-        FrameAllocator::Statistics frame_stats;
-        PacketRecycler::Statistics packet_stats;
-
-        // 性能指标
-        double avg_allocation_time_ms;
-        double avg_deallocation_time_ms;
-        size_t allocation_rate_per_second;
 
         GlobalStatistics()
-            : total_allocated_memory(0)
-            , total_used_memory(0)
-            , peak_memory_usage(0)
-            , overall_efficiency(0.0)
-            , fragmentation_rate(0.0)
-            , avg_allocation_time_ms(0.0)
-            , avg_deallocation_time_ms(0.0)
-            , allocation_rate_per_second(0)
-        {}
+            : total_memory_usage(0)
+            , total_objects(0)
+            , overall_efficiency(0.0) {}
     };
 
     /**

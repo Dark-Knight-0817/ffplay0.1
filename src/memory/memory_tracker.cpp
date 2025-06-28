@@ -20,7 +20,7 @@ MemoryTracker::~MemoryTracker()
     }
 
     // 在析构时检查泄漏
-    if(config_.enable_leadk_detection){
+    if(config_.enable_leak_detection){
         auto leaks = detectLeaks();
         if(!leaks.empty()){
             // 这里应该记录日志，表示发现内存泄漏
@@ -56,7 +56,7 @@ void MemoryTracker::recordAllocation(void* ptr,size_t size, const std::string& l
     }
 
     // 记录分配信息（如果启用泄漏检测）
-    if(config_.enable_leadk_detection){
+    if(config_.enable_leak_detection){
         std::lock_guard<std::mutex> lock(allocations_mutex_);
 
         // 检查容量限制
@@ -91,7 +91,7 @@ bool MemoryTracker::recordDeallocation(void* ptr)
     size_t size = 0;
 
     // 查找并移除分配记录
-    if(config_.enable_leadk_detection){
+    if(config_.enable_leak_detection){
         std::lock_guard<std::mutex> lock(allocations_mutex_);
         auto it = active_allocations_.find(ptr);
         if(it != active_allocations_.end()){
@@ -194,12 +194,12 @@ std::string MemoryTracker::generateReport() const {
 
     // 基本统计
     oss << "--- Basic Statistics ---\n";
-    oss << "Current Usage: " << stats.current_usage.load() << " bytes\n";
-    oss << "Peak Usage: " << stats.peak_usage.load() << " bytes\n";
-    oss << "Total Allocated: " << stats.total_allocated.load() << " bytes\n";
-    oss << "Total Freed: " << stats.total_freed.load() << " bytes\n";
-    oss << "Allocation Count: " << stats.allocation_count.load() << "\n";
-    oss << "Free Count: " << stats.free_count.load() << "\n";
+    oss << "Current Usage: " << stats.current_usage << " bytes\n";
+    oss << "Peak Usage: " << stats.peak_usage << " bytes\n";
+    oss << "Total Allocated: " << stats.total_allocated << " bytes\n";
+    oss << "Total Freed: " << stats.total_freed << " bytes\n";
+    oss << "Allocation Count: " << stats.allocation_count << "\n";
+    oss << "Free Count: " << stats.free_count << "\n";
     oss << "Average Allocation Size: " << std::fixed << std::setprecision(2)
         << stats.getAverageAllocationSize() << " bytes\n";
     oss << "Memory Efficiency: " << std::fixed << std::setprecision(2)
@@ -353,7 +353,7 @@ bool MemoryTracker::isHealthy() const {
     auto stats = getStatistics();
 
     // 检查内存使用是否正常
-    if (stats.current_usage.load() > config_.alert_threshold) {
+    if (stats.current_usage > config_.alert_threshold) {
         return false;
     }
 

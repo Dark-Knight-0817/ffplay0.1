@@ -342,7 +342,7 @@ PacketRecycler::SizeCategory PacketRecycler::categorizeSize(size_t size) const {
     } else if (size < PacketSizes::LARGE_MAX) {
         return SizeCategory::LARGE;
     } else {
-        return SizeCategory::HUGE;
+        return SizeCategory::EXTRA_LARGE;
     }
 }
 
@@ -352,7 +352,7 @@ size_t PacketRecycler::getCategorySuggestedSize(SizeCategory category) const {
     case SizeCategory::SMALL:  return PacketSizes::VIDEO_SD_TYPICAL;
     case SizeCategory::MEDIUM: return PacketSizes::VIDEO_HD_TYPICAL;
     case SizeCategory::LARGE:  return PacketSizes::VIDEO_4K_TYPICAL;
-    case SizeCategory::HUGE:   return PacketSizes::LARGE_MAX;
+    case SizeCategory::EXTRA_LARGE:   return PacketSizes::LARGE_MAX;
     default: return PacketSizes::SMALL_MAX;
     }
 }

@@ -106,6 +106,41 @@ public:
     };
 
     /**
+ * @brief 缓存统计信息快照（非原子版本，用于返回）
+ */
+    struct StatisticsSnapshot {
+        size_t l1_hits;
+        size_t l2_hits;
+        size_t l3_hits;
+        size_t misses;
+        size_t evictions;
+        size_t promotions;
+        size_t demotions;
+        size_t compressions;
+        size_t prefetch_hits;
+        size_t prefetch_misses;
+
+        // 计算总命中率
+        double getTotalHitRate() const {
+            size_t total_hits = l1_hits + l2_hits + l3_hits;
+            size_t total = total_hits + misses;
+            return total > 0 ? static_cast<double>(total_hits) / total : 0.0;
+        }
+
+        // 计算L1命中率
+        double getL1HitRate() const {
+            size_t total = l1_hits + l2_hits + l3_hits + misses;
+            return total > 0 ? static_cast<double>(l1_hits) / total : 0.0;
+        }
+
+        // 计算预取效率
+        double getPrefetchEfficiency() const {
+            size_t total_prefetch = prefetch_hits + prefetch_misses;
+            return total_prefetch > 0 ? static_cast<double>(prefetch_hits) / total_prefetch : 0.0;
+        }
+    };
+
+    /**
      * @brief 缓存统计信息
      */
     struct Statistics {
@@ -120,23 +155,19 @@ public:
         std::atomic<size_t> prefetch_hits{0};
         std::atomic<size_t> prefetch_misses{0};
 
-        // 计算总命中率
-        double getTotalHitRate() const {
-            size_t total_hits = l1_hits.load() + l2_hits.load() + l3_hits.load();
-            size_t total = total_hits + misses.load();
-            return total > 0 ? static_cast<double>(total_hits) / total : 0.0;
-        }
-
-        // 计算L1命中率
-        double getL1HitRate() const {
-            size_t total = l1_hits.load() + l2_hits.load() + l3_hits.load() + misses.load();
-            return total > 0 ? static_cast<double>(l1_hits.load()) / total : 0.0;
-        }
-
-        // 计算预取效率
-        double getPrefetchEfficiency() const {
-            size_t total_prefetch = prefetch_hits.load() + prefetch_misses.load();
-            return total_prefetch > 0 ? static_cast<double>(prefetch_hits.load()) / total_prefetch : 0.0;
+        StatisticsSnapshot getSnapshot() const {
+            return StatisticsSnapshot{
+                l1_hits.load(),
+                l2_hits.load(),
+                l3_hits.load(),
+                misses.load(),
+                evictions.load(),
+                promotions.load(),
+                demotions.load(),
+                compressions.load(),
+                prefetch_hits.load(),
+                prefetch_misses.load()
+            };
         }
     };
 
@@ -243,7 +274,7 @@ public:
     /**
      * @brief 获取统计信息
      */
-    Statistics getStatistics() const { return stats_; }
+    StatisticsSnapshot getStatistics() const { return stats_.getSnapshot(); }
 
     /**
      * @brief 获取缓存使用情况
@@ -294,7 +325,7 @@ private:
     /**
      * @brief 查找缓存项（内部方法）
      */
-    std::pair<std::shared_ptr<CacheEntry>, CacheLevel> findEntry(const Key& key);
+    std::pair<std::shared_ptr<CacheEntry>, CacheLevel> findEntry(const Key& key) const;
 
     /**
      * @brief 提升缓存项到上级
@@ -384,8 +415,9 @@ public:
         return instance;
     }
 
-    static void configure(const typename CacheManager<Key, Value>::Config& config) {
-        getInstance() = CacheManager<Key, Value>(config);
+    static CacheManager<Key, Value>& getInstance(const typename CacheManager<Key, Value>::Config* config = nullptr) {
+        static CacheManager<Key, Value> instance(config ? *config : typename CacheManager<Key, Value>::Config{});
+        return instance;
     }
 
 private:

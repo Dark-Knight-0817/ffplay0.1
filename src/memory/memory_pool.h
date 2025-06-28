@@ -2,13 +2,13 @@
 #define MEMORY_POOL_H
 
 #include <QObject>
-#include <cstddef>
+#include <cstddef>              // size_t
 #include <vector>
 #include <memory>
 #include <mutex>
 #include <atomic>
 #include <unordered_set>
-#include <cassert>
+#include <cassert>              // assert
 #include <unordered_map>
 
 /**
@@ -19,6 +19,8 @@
  * 2. 预分配策略：启动时预分配，减少运行时系统调用
  * 3. 线程安全：使用原子操作和细粒度锁
  * 4. 内存对齐：支持SSE/AVX对齐要求
+ *              SIMD = Single Instruction, Multiple Data（单指令多数据）,SE需要16字节对齐
+ *              AVX (Advanced Vector Extensions) 是 Intel 提供的一套指令集扩展，用于加速并行计算 ,AVX需要32字节对齐  
  * 5. 统计信息：提供详细的性能统计
  */
 
@@ -37,13 +39,13 @@ public:
         bool enable_debug;                      // 启用调试模式
 
         Config()
-            : small_block_size(1024)
-            , medium_block_size(65536)
-            , initial_pool_size(16 * 1024 * 1024)  // 16MB
-            , max_pool_size(512 * 1024 * 1024)     // 512MB
-            , alignment(32)                         // AVX对齐
-            , enable_statistics(true)
-            , enable_debug(false)
+            : small_block_size(1024)               // 1 KB
+            , medium_block_size(65536)             // 64 KB
+            , initial_pool_size(16 * 1024 * 1024)  // 16 MB
+            , max_pool_size(512 * 1024 * 1024)     // 512 MB
+            , alignment(32)                        // AVX对齐
+            , enable_statistics(true)              // 是否启用统计
+            , enable_debug(false)                  // 是否启用调试  
         {}
     };
 
@@ -58,14 +60,21 @@ public:
         size_t pool_hit_count;          // 池命中次数
         size_t system_alloc_count;      // 系统分配次数
 
-        // 计算命中率
+        // 计算命中率 —— 命中 / 总分配
         double getHitRate() const {
             return allocation_count > 0 ? static_cast<double>(pool_hit_count) / allocation_count : 0.0;
         }
 
-        // 计算碎片率
-        double getFragmentationRate() const {
+        // 计算未使用率 —— 1.0 - 当前使用量 / 峰值使用量
+        double getUnusedMemoryRatio() const {
             return peak_usage > 0 ? 1.0 - static_cast<double>(current_usage) / peak_usage : 0.0;
+        }
+
+        // 占位符：真正的碎片率需要访问池内部结构，在MemoryPool类中实现
+        double getFragmentationRate() const {
+            // 这个方法在StatisticsSnapshot中无法实现，因为需要访问池的内部状态
+            // 实际实现在MemoryPool::getFragmentationRate()中
+            return 0.0;
         }
     };
 
@@ -181,6 +190,38 @@ public:
      */
     std::string getReport() const;
 
+    /**
+     * @brief 获取真正的内存碎片率
+     * @return 0.0-1.0 之间的值，0表示无碎片，1表示严重碎片化
+     */
+    double getFragmentationRate() const;
+
+    /**
+     * @brief 获取内存利用率（相对于峰值）
+     * @return 0.0-1.0 之间的值，1表示达到历史峰值
+     */
+    double getMemoryUtilizationRate() const;
+
+    /**
+     * @brief 获取详细的内存池健康报告
+     * @return 包含碎片化、利用率等详细信息的结构
+     */
+    struct HealthReport {
+        double fragmentation_rate;       // 真正的碎片率
+        double utilization_rate;         // 内存利用率
+        double unused_ratio;            // 未使用内存比例
+        size_t total_free_blocks;       // 总空闲块数
+        size_t largest_free_block;      // 最大连续空闲块
+        size_t smallest_free_block;     // 最小空闲块
+        size_t average_free_block_size; // 平均空闲块大小
+        double free_block_size_variance; // 空闲块大小方差
+    };
+
+    /**
+     * @brief 获取详细健康报告
+     */
+    HealthReport getHealthReport() const;
+
 private:
     /**
      * @brief 根据大小选择合适的池
@@ -242,6 +283,18 @@ private:
      * @brief 获取池状态信息
      */
     std::string getPoolStatus() const;
+
+    /**
+     * @brief 计算单个池的碎片信息
+     */
+    struct PoolFragmentInfo {
+        size_t total_free_memory;
+        size_t largest_free_block;
+        size_t free_block_count;
+        std::vector<size_t> free_block_sizes;
+    };
+
+    PoolFragmentInfo analyzePoolFragmentation(LayeredPool* pool) const;
 
 private:
     Config config_;             // 配置信息

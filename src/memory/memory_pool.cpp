@@ -189,8 +189,8 @@ bool MemoryPool::isHealthy() const
         return false;
     }
 
-    // 检查碎片率是否过高
-    double frag_rate = getStatistics().getFragmentationRate();
+    // 检查真正的碎片率是否过高
+    double frag_rate = getFragmentationRate();
     if(frag_rate > 0.8){  // 80%碎片率警告
         return false;
     }
@@ -234,24 +234,176 @@ void MemoryPool::resetStatistics()
 std::string MemoryPool::getReport() const
 {
     auto stats = getStatistics();
+    auto health = getHealthReport();
     std::ostringstream oss;
 
     oss << " === Memory Pool Report ===\n";
-    oss << "Current Usage: " << formatBytes(stats.current_usage) << "\n";
-    oss << "Peak Usage: " << formatBytes(stats.peak_usage) << "\n";
-    oss << "Total Allocated: " << formatBytes(stats.total_allocated) << "\n";
-    oss << "Total Freed: " << formatBytes(stats.total_freed) << "\n";
-    oss << "Allocation Count: " << stats.allocation_count << "\n";
-    oss << "Free Count: " << stats.free_count << "\n";
-    oss << "Pool Hit Rate: " << std::fixed << std::setprecision(2) << (stats.getHitRate() * 100) << "%\n";
-    oss << "Fragmentation Rate: " << std::fixed << std::setprecision(2) << (stats.getFragmentationRate() * 100) << "%\n";
-    oss << "System Allocations: " << stats.system_alloc_count << "\n";
-    
-    // 添加池状态信息
+    oss << "Memory Usage:\n";
+    oss << "  Current Usage: " << formatBytes(stats.current_usage) << "\n";
+    oss << "  Peak Usage: " << formatBytes(stats.peak_usage) << "\n";
+    oss << "  Total Allocated: " << formatBytes(stats.total_allocated) << "\n";
+    oss << "  Total Freed: " << formatBytes(stats.total_freed) << "\n";
+
+    oss << "\nAllocation Statistics:\n";
+    oss << "  Allocation Count: " << stats.allocation_count << "\n";
+    oss << "  Free Count: " << stats.free_count << "\n";
+    oss << "  Pool Hit Rate: " << std::fixed << std::setprecision(2) << (stats.getHitRate() * 100) << "%\n";
+    oss << "  System Allocations: " << stats.system_alloc_count << "\n";
+
+    oss << "\nMemory Health Analysis:\n";
+    oss << "  Memory Utilization: " << std::fixed << std::setprecision(2) << (health.utilization_rate * 100) << "%\n";
+    oss << "  Real Fragmentation Rate: " << std::fixed << std::setprecision(2) << (health.fragmentation_rate * 100) << "%\n";
+    oss << "  Unused Memory Ratio: " << std::fixed << std::setprecision(2) << (health.unused_ratio * 100) << "%\n";
+
+    oss << "\nFree Block Analysis:\n";
+    oss << "  Total Free Blocks: " << health.total_free_blocks << "\n";
+    oss << "  Largest Free Block: " << formatBytes(health.largest_free_block) << "\n";
+    oss << "  Smallest Free Block: " << formatBytes(health.smallest_free_block) << "\n";
+    oss << "  Average Free Block: " << formatBytes(health.average_free_block_size) << "\n";
+    oss << "  Block Size Variance: " << std::fixed << std::setprecision(1) << health.free_block_size_variance << "\n";
+
+    // 添加健康状态评估
+    oss << "\nHealth Assessment:\n";
+    if (health.fragmentation_rate < 0.2) {
+        oss << "  Status: ✅ Excellent - Low fragmentation\n";
+    } else if (health.fragmentation_rate < 0.5) {
+        oss << "  Status: ⚠️  Good - Moderate fragmentation\n";
+    } else if (health.fragmentation_rate < 0.8) {
+        oss << "  Status: ⚠️  Warning - High fragmentation\n";
+    } else {
+        oss << "  Status: ❌ Critical - Severe fragmentation\n";
+        oss << "  Recommendation: Consider calling defragment()\n";
+    }
+
     oss << "\n === Pool Status ===\n";
     oss << getPoolStatus();
 
     return oss.str();
+}
+
+double MemoryPool::getFragmentationRate() const
+{
+    if (is_shutdown_.load()) return 0.0;
+
+    size_t total_free_memory = 0;
+    size_t largest_free_block = 0;
+
+    // 分析所有池的碎片情况
+    for (auto* pool : {small_pool_.get(), medium_pool_.get(), large_pool_.get()}) {
+        if (!pool) continue;
+
+        PoolFragmentInfo info = analyzePoolFragmentation(pool);
+        
+        if (info.total_free_memory > 0) {
+            total_free_memory += info.total_free_memory;
+            largest_free_block = std::max(largest_free_block, info.largest_free_block);
+        }
+    }
+
+    if (total_free_memory == 0) {
+        return 0.0; // 没有空闲内存，无碎片
+    }
+
+    // 碎片率 = 1 - (最大连续块 / 总空闲内存)
+    // 值越接近1表示碎片化越严重
+    double fragmentation = 1.0 - static_cast<double>(largest_free_block) / total_free_memory;
+    
+    // 确保返回值在合理范围内
+    return std::max(0.0, std::min(1.0, fragmentation));
+}
+
+double MemoryPool::getMemoryUtilizationRate() const
+{
+    size_t peak = stats_.peak_usage.load();
+    size_t current = stats_.current_usage.load();
+    return peak > 0 ? static_cast<double>(current) / peak : 1.0;
+}
+
+MemoryPool::HealthReport MemoryPool::getHealthReport() const
+{
+    HealthReport report = {};
+
+    if (is_shutdown_.load()) {
+        return report;
+    }
+
+    std::vector<size_t> all_free_block_sizes;
+    size_t total_free_memory = 0;
+    size_t largest_free_block = 0;
+    size_t smallest_free_block = SIZE_MAX;
+    size_t total_free_blocks = 0;
+
+    // 收集所有池的碎片信息
+    for (auto* pool : {small_pool_.get(), medium_pool_.get(), large_pool_.get()}) {
+        if (!pool) continue;
+
+        PoolFragmentInfo info = analyzePoolFragmentation(pool);
+        
+        if (info.total_free_memory > 0) {
+            total_free_memory += info.total_free_memory;
+            total_free_blocks += info.free_block_count;
+            largest_free_block = std::max(largest_free_block, info.largest_free_block);
+            
+            for (size_t size : info.free_block_sizes) {
+                smallest_free_block = std::min(smallest_free_block, size);
+                all_free_block_sizes.push_back(size);
+            }
+        }
+    }
+
+    // 填充报告
+    report.fragmentation_rate = getFragmentationRate();
+    report.utilization_rate = getMemoryUtilizationRate();
+    report.unused_ratio = 1.0 - report.utilization_rate;
+    report.total_free_blocks = total_free_blocks;
+    report.largest_free_block = largest_free_block;
+    report.smallest_free_block = (smallest_free_block == SIZE_MAX) ? 0 : smallest_free_block;
+
+    // 计算平均空闲块大小
+    if (total_free_blocks > 0) {
+        report.average_free_block_size = total_free_memory / total_free_blocks;
+
+        // 计算空闲块大小方差
+        double sum_squared_diff = 0.0;
+        double average = static_cast<double>(report.average_free_block_size);
+        
+        for (size_t size : all_free_block_sizes) {
+            double diff = static_cast<double>(size) - average;
+            sum_squared_diff += diff * diff;
+        }
+        
+        report.free_block_size_variance = sum_squared_diff / total_free_blocks;
+    }
+
+    return report;
+}
+
+MemoryPool::PoolFragmentInfo MemoryPool::analyzePoolFragmentation(LayeredPool* pool) const
+{
+    PoolFragmentInfo info = {};
+    
+    if (!pool) return info;
+
+    // 使用try_lock避免在统计时阻塞正常操作
+    std::unique_lock<std::mutex> lock(pool->mutex, std::try_to_lock);
+    if (!lock.owns_lock()) {
+        // 无法获取锁，返回空信息
+        return info;
+    }
+
+    // 遍历空闲链表
+    MemoryBlock* block = pool->free_list;
+    while (block) {
+        if (block->is_free) {
+            info.total_free_memory += block->size;
+            info.largest_free_block = std::max(info.largest_free_block, block->size);
+            info.free_block_count++;
+            info.free_block_sizes.push_back(block->size);
+        }
+        block = block->next;
+    }
+
+    return info;
 }
 
 void* MemoryPool::allocateFromPool(LayeredPool* pool, size_t size)
@@ -320,10 +472,6 @@ void* MemoryPool::allocateFromPool(LayeredPool* pool, size_t size)
 
 void MemoryPool::deallocateToPool(void* ptr)
 {
-    // 使用更安全的方式查找池
-    LayeredPool* target_pool = nullptr;
-    MemoryBlock* reuse_block = nullptr;
-    
     // 查找指针属于哪个池
     for(auto* pool : {small_pool_.get(), medium_pool_.get(), large_pool_.get()}){
         if(!pool) continue;
@@ -338,8 +486,6 @@ void MemoryPool::deallocateToPool(void* ptr)
             uint8_t* chunk_end = chunk_start + (pool->block_size * pool->blocks_per_chunk);
             
             if(ptr >= chunk_start && ptr < chunk_end){
-                target_pool = pool;
-                
                 // 计算正确的块起始地址
                 size_t block_index = (static_cast<uint8_t*>(ptr) - chunk_start) / pool->block_size;
                 void* block_start = chunk_start + block_index * pool->block_size;
@@ -495,7 +641,7 @@ MemoryPool::LayeredPool* MemoryPool::selectPool(size_t size)
     return nullptr; // 超大块使用系统分配
 }
 
-// 新增的辅助方法
+// 辅助方法实现
 void MemoryPool::recordPointerSource(void* ptr, bool from_pool, size_t size)
 {
     std::lock_guard<std::mutex> lock(pointer_mutex_);
@@ -504,7 +650,8 @@ void MemoryPool::recordPointerSource(void* ptr, bool from_pool, size_t size)
 
 MemoryPool::MemoryBlock* MemoryPool::findMemoryBlock(LayeredPool* pool, void* ptr)
 {
-    // 在已分配的块中查找（这里简化，实际需要维护已分配块列表）
+    // 在已分配的块中查找（简化实现：总是返回nullptr，创建新块）
+    // 完整实现需要维护已分配块的列表或使用更复杂的数据结构
     return nullptr;
 }
 

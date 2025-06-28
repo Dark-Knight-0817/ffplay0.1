@@ -114,7 +114,7 @@ private:
 
     // 分层池结构
     struct LayeredPool{
-        std::vector<std::unique_ptr<uint8_t>> chunks;       // 大块内存chunk
+        std::vector<std::unique_ptr<uint8_t[]>> chunks;       // 大块内存chunk
         MemoryBlock* free_list;                             // 可用链表
         std::mutex mutex;                                   // 线程锁
         size_t block_size;                                  // 块大小

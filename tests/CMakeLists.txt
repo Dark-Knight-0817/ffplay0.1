@@ -1,15 +1,15 @@
-# tests/CMakeLists.txt - 测试专用构建配置
+# tests/CMakeLists.txt - 头文件分离版本
 
-# 查找Qt Test模块
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Test)
 
-# 设置测试源文件
+# 测试源文件（包含cpp实现文件）
 set(TEST_SOURCES
-    test_main.cpp
+    main.cpp
     memory/test_memory_pool.cpp
+    memory/test_pool_performance.cpp
 )
 
-# 需要测试的源文件（从主项目引用）
+# 被测试的源文件
 set(TESTED_SOURCES
     ../src/memory/memory_pool.cpp
 )
@@ -32,5 +32,11 @@ target_link_libraries(run_tests PRIVATE
     Qt${QT_VERSION_MAJOR}::Test
 )
 
-# 注册测试到CTest
-add_test(NAME memory_pool_tests COMMAND run_tests)
+# 注册到CTest
+add_test(NAME memory_pool_all_tests COMMAND run_tests)
+
+# 设置测试超时
+set_tests_properties(memory_pool_all_tests PROPERTIES TIMEOUT 120)
+
+# 输出构建信息
+message(STATUS "测试配置: 头文件分离的标准C++结构")

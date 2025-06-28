@@ -9,6 +9,7 @@
 #include <atomic>
 #include <unordered_set>
 #include <cassert>
+#include <unordered_map>
 
 /**
  * @brief 高性能分层内存池
@@ -217,6 +218,31 @@ private:
     void debugTrackAllocation(void* ptr, size_t size);
     void debugTrackDeallocation(void* ptr);
 
+    /**
+     * @brief 将内存归还到池中
+     */
+    void deallocateToPool(void* ptr);
+
+    /**
+     * @brief 记录指针来源和大小
+     */
+    void recordPointerSource(void* ptr, bool from_pool, size_t size);
+    
+    /**
+     * @brief 查找内存块
+     */
+    MemoryBlock* findMemoryBlock(LayeredPool* pool, void* ptr);
+    
+    /**
+     * @brief 格式化字节数显示
+     */
+    std::string formatBytes(size_t bytes) const;
+    
+    /**
+     * @brief 获取池状态信息
+     */
+    std::string getPoolStatus() const;
+
 private:
     Config config_;             // 配置信息
     mutable Statistics stats_;  // 统计信息
@@ -232,6 +258,10 @@ private:
     // 调试信息（仅在调试模式下使用）
     mutable std::mutex debug_mutex_;
     std::unordered_set<void*> allocated_pointers_;
+
+    // 新增：指针来源跟踪
+    mutable std::mutex pointer_mutex_;
+    std::unordered_map<void*, std::pair<bool, size_t>> pointer_sources_;  // true=池分配, false=系统分配
 };
 
 

@@ -1,1 +1,45 @@
-/build
+# 构建目录
+build/
+build-*/
+*build*
+
+# CMake生成文件
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+
+# 编译产物
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+*.app
+
+# Qt相关
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+*.pro.user*
+
+# IDE文件
+.vscode/
+.idea/
+*.user
+.DS_Store
+Thumbs.db
+
+# 日志和临时文件
+*.log
+*.tmp
+*~
+*.autosave
+*.orig
+
+# 测试产物
+tests/run_tests
+tests/moc_*

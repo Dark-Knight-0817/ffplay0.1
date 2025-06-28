@@ -248,8 +248,8 @@ endif()
 
 # ============ 可选：测试构建 ============
 # 目前tests目录为空，所以注释掉
-# option(BUILD_TESTS "Build tests" OFF)
-# if(BUILD_TESTS)
-#     enable_testing()
-#     add_subdirectory(tests)
-# endif()
+option(BUILD_TESTS "Build tests" OFF)
+if(BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()

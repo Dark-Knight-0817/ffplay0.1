@@ -202,11 +202,11 @@ namespace FFmpegFormats {
     constexpr int GRAY16LE = AV_PIX_FMT_GRAY16LE;
 }
 
-/**
- * @brief FFmpeg帧分配器工厂函数
- */
-std::unique_ptr<IFrameAllocator> createFFmpegFrameAllocator(
-    std::unique_ptr<AllocatorConfig> config = nullptr);
+// /**
+//  * @brief FFmpeg帧分配器工厂函数
+//  */
+// std::unique_ptr<IFrameAllocator> createFFmpegFrameAllocator(
+//     std::unique_ptr<AllocatorConfig> config = nullptr);
 
 /**
  * @brief 便捷的FFmpeg帧分配宏
@@ -225,5 +225,11 @@ std::unique_ptr<IFrameAllocator> createFFmpegFrameAllocator(
     ALLOCATE_FFMPEG_FRAME(width, height, media::FFmpegFormats::RGB24)
 
 } // namespace media
+
+/**
+ * @brief FFmpeg帧分配器工厂函数
+ */
+std::unique_ptr<media::IFrameAllocator> createFFmpegFrameAllocator(
+    std::unique_ptr<media::AllocatorConfig> config = nullptr);
 
 #endif // FFMPEG_FRAME_ALLOCATOR_H

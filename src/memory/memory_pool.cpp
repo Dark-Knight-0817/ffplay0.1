@@ -6,6 +6,108 @@
 #include <new>
 #include <cassert>
 
+// ============ 跨平台内存对齐兼容性代码 ============
+#ifdef _WIN32
+    #include <malloc.h>  // for _aligned_malloc and _aligned_free
+#elif defined(__APPLE__) || defined(__linux__)
+    #include <cstdlib>   // for aligned_alloc and free
+#if !defined(__APPLE__)
+    #include <malloc.h>  // for memalign on some Linux systems
+#endif
+#endif
+
+namespace {
+// 跨平台对齐内存分配函数
+inline void* aligned_alloc_compat(size_t alignment, size_t size) {
+    // 确保 size 是 alignment 的倍数（某些平台要求）
+    size_t aligned_size = (size + alignment - 1) & ~(alignment - 1);
+
+#ifdef _WIN32
+    // Windows: 使用 _aligned_malloc
+    return _aligned_malloc(aligned_size, alignment);
+
+#elif defined(__APPLE__)
+// macOS: 优先使用 aligned_alloc (macOS 10.15+)
+#if defined(MAC_OS_X_VERSION_10_15) && MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_15
+    return std::aligned_alloc(alignment, aligned_size);
+#else
+        // 回退到 posix_memalign
+    void* ptr = nullptr;
+    if (posix_memalign(&ptr, alignment, aligned_size) == 0) {
+        return ptr;
+    }
+    return nullptr;
+#endif
+
+#elif defined(__linux__)
+// Linux: 检查 glibc 版本和 C++ 标准支持
+#if defined(__GLIBC__) && __GLIBC__ >= 2 && __GLIBC_MINOR__ >= 16 && __cplusplus >= 201703L
+        // glibc 2.16+ 且 C++17+ 支持 aligned_alloc
+    return std::aligned_alloc(alignment, aligned_size);
+#else
+        // 回退到 posix_memalign 或 memalign
+    void* ptr = nullptr;
+#ifdef _POSIX_C_SOURCE
+    if (posix_memalign(&ptr, alignment, aligned_size) == 0) {
+        return ptr;
+    }
+#else
+        // 某些老版本 Linux 系统
+    ptr = memalign(alignment, aligned_size);
+    if (ptr != nullptr) {
+        return ptr;
+    }
+#endif
+    return nullptr;
+#endif
+
+#else
+    // 其他 Unix 系统：通用实现
+    void* ptr = nullptr;
+    if (posix_memalign(&ptr, alignment, aligned_size) == 0) {
+        return ptr;
+    }
+
+    // 最后的回退：手动对齐（兼容性最强但效率较低）
+    ptr = std::malloc(aligned_size + alignment - 1 + sizeof(void*));
+    if (!ptr) return nullptr;
+
+    // 计算对齐地址
+    uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
+    uintptr_t aligned_addr = (addr + sizeof(void*) + alignment - 1) & ~(alignment - 1);
+
+    // 在对齐地址前存储原始指针（用于释放）
+    void** aligned_ptr = reinterpret_cast<void**>(aligned_addr);
+    *(aligned_ptr - 1) = ptr;
+
+    return reinterpret_cast<void*>(aligned_addr);
+#endif
+}
+
+// 跨平台对齐内存释放函数
+inline void aligned_free_compat(void* ptr) {
+    if (!ptr) return;
+
+#ifdef _WIN32
+    _aligned_free(ptr);
+
+#elif defined(__APPLE__) || defined(__linux__)
+#if (defined(__APPLE__) && defined(MAC_OS_X_VERSION_10_15) && MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_15) || \
+    (defined(__linux__) && defined(__GLIBC__) && __GLIBC__ >= 2 && __GLIBC_MINOR__ >= 16 && __cplusplus >= 201703L)
+        std::free(ptr);
+#else
+    std::free(ptr);  // posix_memalign 分配的内存用 free 释放
+#endif
+
+#else
+    // 通用实现的释放：需要获取原始指针
+    void** aligned_ptr = reinterpret_cast<void**>(ptr);
+    void* original_ptr = *(aligned_ptr - 1);
+    std::free(original_ptr);
+#endif
+}
+}
+
 MemoryPool::MemoryPool(const Config& config)
     : config_(config)
 {
@@ -80,7 +182,8 @@ void* MemoryPool::allocate(size_t size, size_t alignment)
 
     // 如果池分配失败，使用系统分配
     if(!ptr){
-        ptr = std::aligned_alloc(actual_alignment, aligned_size);
+        // ptr = std::aligned_alloc(actual_alignment, aligned_size);
+        ptr = aligned_alloc_compat(actual_alignment, aligned_size);
         if(!ptr){
             throw std::bad_alloc();
         }
@@ -133,7 +236,8 @@ void MemoryPool::deallocate(void* ptr)
         deallocateToPool(ptr);
     } else {
         // 系统分配的内存，使用系统释放
-        std::free(ptr);
+        // std::free(ptr);
+        aligned_free_compat(ptr);
     }
 
     // 更新统计信息
@@ -534,7 +638,8 @@ bool MemoryPool::expandPool(LayeredPool* pool)
 
     // 分配大块内存，使用对齐分配
     auto chunk = std::unique_ptr<uint8_t[]>(
-        static_cast<uint8_t*>(std::aligned_alloc(config_.alignment, chunk_size))
+        // static_cast<uint8_t*>(std::aligned_alloc(config_.alignment, chunk_size))
+        static_cast<uint8_t*>(aligned_alloc_compat(config_.alignment, chunk_size))
     );
     
     if(!chunk){

@@ -587,10 +587,10 @@ size_t FFmpegFrameAllocator::FFmpegFramePool::calculateSingleFrameSize() const {
     return size > 0 ? static_cast<size_t>(size) : 0;
 }
 
-// 工厂函数实现
-std::unique_ptr<IFrameAllocator> createFFmpegFrameAllocator(
-    std::unique_ptr<AllocatorConfig> config) {
-    return std::make_unique<FFmpegFrameAllocator>(std::move(config));
-}
-
 } // namespace media
+
+// 工厂函数实现
+std::unique_ptr<media::IFrameAllocator> createFFmpegFrameAllocator(
+    std::unique_ptr<media::AllocatorConfig> config) {
+    return std::make_unique<media::FFmpegFrameAllocator>(std::move(config));
+}

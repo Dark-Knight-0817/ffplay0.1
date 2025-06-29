@@ -28,7 +28,7 @@ class MemoryPool
 {
 
 public:
-    // 内存池配置
+    // 内存池参数
     struct Config{
         size_t small_block_size;                // 小块内存
         size_t medium_block_size;               // 中块内存
@@ -138,9 +138,9 @@ private:
         {}
     };
 
-    // 分层池结构
+    // 分层池结构 - 管理内存块
     struct LayeredPool{
-        std::vector<std::unique_ptr<uint8_t[]>> chunks;     // 大块内存chunk
+        std::vector<std::unique_ptr<uint8_t[]>> chunks;     // chunks 用智能指针管理申请的内存, 将智能指针放到 chunks 这个动态数组中
         MemoryBlock* free_list;                             // 可用链表
         std::mutex mutex;                                   // 线程锁
         size_t block_size;                                  // 块大小
@@ -181,6 +181,7 @@ public:
      */
     void defragment();
 
+public:
     /**
      * @brief 检查内存池状态
      * @return true表示状态正常
@@ -250,9 +251,9 @@ private:
     void* allocateFromPool(LayeredPool* pool, size_t size);
 
     /**
-     * @brief 扩展池容量
+     * @brief 真正的分配内存
      */
-    bool expandPool(LayeredPool* pool);
+    bool allocateChunk(LayeredPool* pool);
 
     /**
      * @brief 对齐内存地址
@@ -326,9 +327,9 @@ private:
 
     // 调试信息（仅在调试模式下使用）
     mutable std::mutex debug_mutex_;
-    std::unordered_set<void*> allocated_pointers_;
+    std::unordered_set<void*> allocated_pointers_; // 检测内存泄露、只关心该指针是否已释放
 
-    // 新增：指针来源跟踪
+    // 指针来源跟踪, pointer_sources_ 关心"这块内存从哪来，多大，该怎么还"
     mutable std::mutex pointer_mutex_;
     std::unordered_map<void*, std::pair<bool, size_t>> pointer_sources_;  // true=池分配, false=系统分配
 };

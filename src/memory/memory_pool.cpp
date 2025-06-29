@@ -127,7 +127,7 @@ MemoryPool::MemoryPool(const Config& config)
     large_pool_ = std::make_unique<LayeredPool>(config_.medium_block_size * 16, 16);
 
     /* === 预分配初始内存 === */
-    expandPool(small_pool_.get());   // 预分配小块池
+    allocateChunk(small_pool_.get());   // 预分配小块池
     // 中大块池按需分配，减少内存浪费
 }
 
@@ -138,19 +138,19 @@ MemoryPool::~MemoryPool()
     // 清理分配记录
     {
         std::lock_guard<std::mutex> lock(pointer_mutex_);
-        pointer_sources_.clear();
+        pointer_sources_.clear();   // 清空内存路由
     }
 
     // 在调试模式下检查内存泄漏
     if(config_.enable_debug){
         std::lock_guard<std::mutex> lock(debug_mutex_);
-        if(!allocated_pointers_.empty()){
+        if(!allocated_pointers_.empty()){ // 检测到内存泄漏的指针没被释放
             // 输出泄漏信息
             if(config_.enable_statistics) {
                 fprintf(stderr, "Memory leak detected: %zu pointers not freed\n", 
                         allocated_pointers_.size());
             }
-            allocated_pointers_.clear();
+            allocated_pointers_.clear();    // 清空set结构,内存由智能指针释放
         }
     }
 }
@@ -556,7 +556,7 @@ void* MemoryPool::allocateFromPool(LayeredPool* pool, size_t size)
     }
 
     // 没有合适的空闲块，尝试扩展池
-    if(expandPool(pool)){
+    if(allocateChunk(pool)){
         // 扩展成功，获取新的空闲块
         if(pool->free_list && pool->free_list->is_free){
             MemoryBlock* block = pool->free_list;
@@ -625,7 +625,7 @@ void MemoryPool::deallocateToPool(void* ptr)
     std::free(ptr);
 }
 
-bool MemoryPool::expandPool(LayeredPool* pool)
+bool MemoryPool::allocateChunk(LayeredPool* pool)
 {
     // 计算需要分配的内存大小
     size_t chunk_size = pool->block_size * pool->blocks_per_chunk;

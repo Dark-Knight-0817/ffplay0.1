@@ -297,7 +297,7 @@ if (pool->free_list && pool->free_list->is_free && pool->free_list->size >= size
 // 构造函数中预分配小块池
 MemoryPool::MemoryPool(const Config& config) {
     // ...
-    expandPool(small_pool_.get());   // 预分配，减少运行时开销
+    allocateChunk(small_pool_.get());   // 预分配，减少运行时开销
 }
 ```
 

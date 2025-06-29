@@ -1,5 +1,6 @@
 // frame_allocator_factory.cpp - 无Mock版本的工厂实现
 #include "frame_allocator_factory.h"
+#include "ffmpeg_allocator/ffmpeg_frame_allocator.h" 
 #include <algorithm>
 #include <cctype>
 

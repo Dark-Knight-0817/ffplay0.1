@@ -48,6 +48,9 @@ if(WIN32)
         ${SWRESAMPLE_LIBRARY}
     )
 
+    # 定义FFmpeg可用宏
+    add_compile_definitions(FFMPEG_AVAILABLE)
+
     # 输出调试信息
     message(STATUS "FFmpeg根目录: ${FFMPEG_ROOT}")
     message(STATUS "FFmpeg包含目录: ${FFMPEG_INCLUDE_DIRS}")
@@ -77,6 +80,9 @@ elseif(APPLE)
         libswresample
     )
 
+    # 定义FFmpeg可用宏
+    add_compile_definitions(FFMPEG_AVAILABLE)
+
     message(STATUS "macOS FFmpeg 配置:")
     message(STATUS "  包含目录: ${FFMPEG_INCLUDE_DIRS}")
     message(STATUS "  库目录: ${FFMPEG_LIBRARY_DIRS}")
@@ -91,6 +97,9 @@ else()
         libswscale
         libswresample
     )
+
+    # 定义FFmpeg可用宏
+    add_compile_definitions(FFMPEG_AVAILABLE)
 endif()
 
 # ============ 源文件组织（按新目录结构） ============
@@ -127,10 +136,27 @@ set(MEMORY_SOURCES
 #     src/utils/xxx.cpp
 # )
 
+# src/media/allocator/ 目录下的帧分配器模块
+set(FRAME_ALLOCATOR_SOURCES
+    # 抽象层 - 只有实现文件需要编译
+    src/media/allocator/frame_allocator_factory.cpp
+    
+    # FFmpeg后端 - 有FFmpeg才编译  
+    src/media/allocator/ffmpeg_allocator/ffmpeg_frame_allocator.cpp
+)
+
+# 检查是否确实存在这些源文件
+foreach(source_file ${FRAME_ALLOCATOR_SOURCES})
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${source_file}")
+        message(WARNING "源文件不存在: ${source_file}")
+    endif()
+endforeach()
+
 # 合并所有源文件
 set(ALL_SOURCES
     ${MAIN_SOURCES}
     ${MEMORY_SOURCES}
+    ${FRAME_ALLOCATOR_SOURCES}
     # ${CORE_SOURCES}      # 当你有这些文件时取消注释
     # ${MEDIA_SOURCES}
     # ${UTILS_SOURCES}

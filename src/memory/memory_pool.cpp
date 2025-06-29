@@ -11,9 +11,10 @@
     #include <malloc.h>  // for _aligned_malloc and _aligned_free
 #elif defined(__APPLE__) || defined(__linux__)
     #include <cstdlib>   // for aligned_alloc and free
-#if !defined(__APPLE__)
-    #include <malloc.h>  // for memalign on some Linux systems
-#endif
+
+    #if !defined(__APPLE__)
+        #include <malloc.h>  // for memalign on some Linux systems
+    #endif
 #endif
 
 namespace {
@@ -172,7 +173,7 @@ void* MemoryPool::allocate(size_t size, size_t alignment)
     LayeredPool* pool = selectPool(aligned_size);
     if(pool && aligned_size <= pool->block_size){
         ptr = allocateFromPool(pool, aligned_size);
-        from_pool = (ptr != nullptr);
+        from_pool = (ptr != nullptr);   // true, 从内存池分配
         
         // 如果从池分配成功，进行对齐调整
         if(ptr && actual_alignment > config_.alignment) {
@@ -182,12 +183,12 @@ void* MemoryPool::allocate(size_t size, size_t alignment)
 
     // 如果池分配失败，使用系统分配
     if(!ptr){
-        // ptr = std::aligned_alloc(actual_alignment, aligned_size);
+        // ptr = std::aligned_alloc(actual_alignment, aligned_size);    // apple
         ptr = aligned_alloc_compat(actual_alignment, aligned_size);
         if(!ptr){
             throw std::bad_alloc();
         }
-        from_pool = false;
+        from_pool = false;  // false, 从系统分配
     }
 
     // 记录指针来源 - 使用更高效的方式
@@ -221,7 +222,7 @@ void MemoryPool::deallocate(void* ptr)
     bool from_pool = false;
     size_t original_size = 0;
     
-    {
+    {   // 这是一种控制 locker 范围的方法
         std::lock_guard<std::mutex> lock(pointer_mutex_);
         auto it = pointer_sources_.find(ptr);
         if(it != pointer_sources_.end()){

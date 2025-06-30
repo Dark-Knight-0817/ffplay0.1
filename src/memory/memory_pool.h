@@ -162,7 +162,7 @@ public:
 
 public:
     /**
-     * @brief 分配内存
+     * @brief 分配内存,优先从内存池分配,如果内存池中没有足够的空间,则从系统分配
      * @param size 需要分配的字节数
      * @param alignment 对齐要求（0表示使用默认对齐）
      * @return 分配的内存指针，失败返回nullptr
@@ -177,7 +177,7 @@ public:
 
     /**
      * @brief 整理内存碎片
-     * 合并相邻的空闲块，提高内存利用率
+     * 合并相邻的空闲块(地址连续才合并)，提高内存利用率
      */
     void defragment();
 
@@ -249,6 +249,16 @@ private:
      * @brief 从指定池分配内存
      */
     void* allocateFromPool(LayeredPool* pool, size_t size);
+
+    /**
+     * @brief 从内存块的链表获得内存块
+     */
+    void *allocateBlock(LayeredPool *pool, MemoryBlock *block);
+
+    /**
+     * @brief 尝试拓展内存池并分配内存
+     */
+    void *tryExpandAndAllocate(LayeredPool *pool, size_t size);
 
     /**
      * @brief 真正的分配内存

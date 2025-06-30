@@ -224,8 +224,8 @@ void MemoryPool::deallocate(void* ptr)
     
     {   // 这是一种控制 locker 范围的方法
         std::lock_guard<std::mutex> lock(pointer_mutex_);
-        auto it = pointer_sources_.find(ptr);
-        if(it != pointer_sources_.end()){
+        auto it = pointer_sources_.find(ptr);       // 迭代器遍历 map
+        if(it != pointer_sources_.end()){   
             from_pool = it->second.first;
             original_size = it->second.second;
             pointer_sources_.erase(it);
@@ -249,7 +249,7 @@ void MemoryPool::deallocate(void* ptr)
 
 void MemoryPool::defragment()
 {
-    // 对每个池进行碎片整理
+    // 对每个池进行碎片整理 - 遍历语法见.doc
     for(auto* pool : {small_pool_.get(), medium_pool_.get(), large_pool_.get()}){
         if(!pool) continue;
         
@@ -262,7 +262,7 @@ void MemoryPool::defragment()
         while(current && current->next){
             MemoryBlock* next = current->next;
 
-            // 检查是否相邻
+            // 检查是否相邻,只有地址相邻的空闲块(连续)可以进行合并,否则(离散)跳过
             if(static_cast<uint8_t*>(current->data) + current->size == next->data){
                 // 合并块
                 current->size += next->size;
@@ -511,67 +511,134 @@ MemoryPool::PoolFragmentInfo MemoryPool::analyzePoolFragmentation(LayeredPool* p
     return info;
 }
 
+// void* MemoryPool::allocateFromPool(LayeredPool* pool, size_t size)
+// {
+//     std::lock_guard<std::mutex> lock(pool->mutex);
+
+//      MemoryBlock* block = pool->free_list;  // 从第一块开始
+//     // 快速路径：检查第一个空闲块
+//     if(pool->free_list && pool->free_list->is_free && pool->free_list->size >= size) {
+//         // MemoryBlock* block = pool->free_list;
+//         block->is_free = false; // 分配后重置标记位
+        
+//         // 从空闲链表移除
+//         pool->free_list = block->next;
+//         if(block->next) {
+//             block->next->prev = nullptr;
+//         }
+//         block->next = nullptr;
+//         block->prev = nullptr;
+        
+//         return block->data;
+//     }
+
+//     // 慢速路径：查找合适的空闲块
+//     // MemoryBlock* block = pool->free_list;
+//     block = block->next; // 从第二块开始,因为第一块已经被快速检查过了
+//     while(block){
+//         if(block->is_free && block->size >= size){
+//             block->is_free = false;
+            
+//             // 从空闲链表移除
+//             if(block->prev) {
+//                 block->prev->next = block->next;
+//             } else {
+//                 pool->free_list = block->next;
+//             }
+//             if(block->next) {
+//                 block->next->prev = block->prev;
+//             }
+            
+//             // 重置链表指针
+//             block->next = nullptr;
+//             block->prev = nullptr;
+            
+//             return block->data;
+//         }
+//         block = block->next;
+//     }
+
+//     // 没有合适的空闲块，尝试扩展池
+//     if(allocateChunk(pool)){
+//         // 扩展成功，获取新的空闲块
+//         if(pool->free_list && pool->free_list->is_free){
+//             MemoryBlock* block = pool->free_list;
+//             block->is_free = false;
+//             pool->free_list = block->next;
+//             if(block->next) {
+//                 block->next->prev = nullptr;
+//             }
+//             block->next = nullptr;
+//             block->prev = nullptr;
+//             return block->data;
+//         }
+//     }
+
+//     return nullptr;
+// }
+
 void* MemoryPool::allocateFromPool(LayeredPool* pool, size_t size)
 {
     std::lock_guard<std::mutex> lock(pool->mutex);
 
-    // 快速路径：检查第一个空闲块
-    if(pool->free_list && pool->free_list->is_free && pool->free_list->size >= size) {
-        MemoryBlock* block = pool->free_list;
-        block->is_free = false;
-        
-        // 从空闲链表移除
-        pool->free_list = block->next;
-        if(block->next) {
-            block->next->prev = nullptr;
-        }
-        block->next = nullptr;
-        block->prev = nullptr;
-        
-        return block->data;
+    MemoryBlock* block = pool->free_list;
+    
+    // 处理空链表的情况
+    if(!block) {
+        return tryExpandAndAllocate(pool, size);
     }
 
-    // 慢速路径：查找合适的空闲块
-    MemoryBlock* block = pool->free_list;
-    while(block){
-        if(block->is_free && block->size >= size){
-            block->is_free = false;
-            
-            // 从空闲链表移除
-            if(block->prev) {
-                block->prev->next = block->next;
-            } else {
-                pool->free_list = block->next;
-            }
-            if(block->next) {
-                block->next->prev = block->prev;
-            }
-            
-            // 重置链表指针
-            block->next = nullptr;
-            block->prev = nullptr;
-            
-            return block->data;
+    // 快速路径：检查第一个空闲块
+    if(block->is_free && block->size >= size) {
+        return allocateBlock(pool, block);
+    }
+
+    // 慢速路径：从第二个块开始查找
+    block = block->next;  // 现在安全了，因为我们已经确认 free_list 不是 nullptr
+    while(block) {
+        if(block->is_free && block->size >= size) {
+            return allocateBlock(pool, block);
         }
         block = block->next;
     }
 
-    // 没有合适的空闲块，尝试扩展池
-    if(allocateChunk(pool)){
-        // 扩展成功，获取新的空闲块
-        if(pool->free_list && pool->free_list->is_free){
-            MemoryBlock* block = pool->free_list;
-            block->is_free = false;
-            pool->free_list = block->next;
-            if(block->next) {
-                block->next->prev = nullptr;
-            }
-            block->next = nullptr;
-            block->prev = nullptr;
-            return block->data;
+    // 没找到合适的块，尝试扩展池
+    return tryExpandAndAllocate(pool, size);
+}
+
+// 提取的分配块函数，消除代码重复
+void* MemoryPool::allocateBlock(LayeredPool* pool, MemoryBlock* block)
+{
+    block->is_free = false;
+    
+    // 从空闲链表移除
+    if(block->prev) {
+        block->prev->next = block->next;
+    } else {
+        // 这是第一个节点
+        pool->free_list = block->next;
+    }
+    
+    if(block->next) {
+        block->next->prev = block->prev;
+    }
+    
+    // 重置链表指针
+    block->next = nullptr;
+    block->prev = nullptr;
+    
+    return block->data;
+}
+
+// 提取的扩展和分配函数
+void* MemoryPool::tryExpandAndAllocate(LayeredPool* pool, size_t size)
+{
+    if(allocateChunk(pool)) {
+        // 扩展成功，检查新的第一个块
+        if(pool->free_list && pool->free_list->is_free && pool->free_list->size >= size) {
+            return allocateBlock(pool, pool->free_list);
         }
     }
-
     return nullptr;
 }
 

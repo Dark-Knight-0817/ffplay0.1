@@ -310,6 +310,53 @@ for (size_t i = 0; i < pool->blocks_per_chunk; ++i) {
 }
 ```
 
+### 4. 基于范围的for循环
+```cpp
+/**
+ * std::unique_ptr<T,Deleter>::get
+ * @return Pointer to the managed object or nullptr if no object is owned.
+ * @note   std::unique_ptr<Res> up(new Res{"Hello, world!"});
+ *         Res* res = up.get();
+ * */
+for(auto* pool : {small_pool_.get(), medium_pool_.get(), large_pool_.get()})
+```
+## 语法分析:
+```cpp
+// C++11引入了统一的初始化语法
+int arr[] = {1, 2, 3};           // C风格数组
+std::vector<int> vec = {1, 2, 3}; // 容器初始化
+auto list = {1, 2, 3};           // 自动推导为initializer_list<int>
+
+// 在不同上下文中，花括号有不同含义：
+
+// 1. 数组初始化
+int arr[] = {1, 2, 3};
+
+// 2. 聚合初始化  
+struct Point { int x, y; };
+Point p = {10, 20};
+
+// 3. 容器初始化
+std::vector<int> vec = {1, 2, 3};
+
+// 4. initializer_list构造（你的情况）
+for(auto x : {1, 2, 3}) { }  // 推导为 initializer_list<int>
+```
+
+## 编译器的推导过程：
+```cpp
+LayeredPool* p1, p2, p3;  // unique_ptr<LayeredPool> obj.get() 等价于
+
+// 步骤1：确定花括号内元素的公共类型
+{p1, p2, p3}  // 所有元素都是 LayeredPool*
+
+// 步骤2：在range-for上下文中，推导为initializer_list
+// 等价于：
+std::initializer_list<LayeredPool*> temp_list = {p1, p2, p3};
+for(auto* pool : temp_list) { ... }
+```
+
+
 ## 🎯 使用场景适配
 
 ### FFmpeg特定优化

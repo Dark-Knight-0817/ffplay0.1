@@ -115,6 +115,25 @@ src/core/engine/decode_thread.*    // 解码线程管理
 ```
 
 **核心概念学习**:
+**结构**
+```
+src/media/
+├── input/
+│   ├── input_source.h          // 输入源抽象（文件/网络流）
+│   ├── rtsp_input.cpp          // RTSP输入实现
+│   └── file_input.cpp          // 文件输入实现
+├── demux/
+│   ├── demuxer.h               // 解封装器
+│   └── ffmpeg_demuxer.cpp      // FFmpeg解封装实现
+├── decoder/
+│   ├── video_decoder.h         // 视频解码器接口
+│   ├── audio_decoder.h         // 音频解码器接口
+│   └── ffmpeg_decoder.cpp      // FFmpeg解码器实现
+└── converter/
+    ├── video_converter.h       // 视频格式转换
+    └── audio_converter.h       // 音频格式转换
+```
+
 1. **FFmpeg解码流程**
    ```cpp
    // 完整的解码流程学习

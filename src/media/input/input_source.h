@@ -30,6 +30,7 @@ enum class InputSourceState {
     Opening,       // 正在打开
     Opened,        // 已打开
     Reading,       // 正在读取
+    Disconnected,  // 网络断流
     EndOfStream,   // 流结束
     Error          // 错误状态
 };

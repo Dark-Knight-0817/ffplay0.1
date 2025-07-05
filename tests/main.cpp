@@ -7,6 +7,7 @@
 
 #ifdef FFMPEG_AVAILABLE
 #include "media/allocator/test_ffmpeg_frame_allocator.h"
+#include "media/input/test_input_source.h"  // 新增输入源测试
 #endif
 
 int main(int argc, char *argv[])
@@ -60,7 +61,7 @@ int main(int argc, char *argv[])
     
 #ifdef FFMPEG_AVAILABLE
     // 2. Frame Allocator测试
-    if (filter.isEmpty() || filter == "media") {
+    if (filter.isEmpty() || filter == "media" || filter == "allocator") {
         qDebug() << "\n🎬 2. Frame Allocator模块测试";
         qDebug() << "----------------------------------------";
         
@@ -77,11 +78,30 @@ int main(int argc, char *argv[])
             }
         }
     }
+    
+    // 3. 输入源测试 (新增)
+    if (filter.isEmpty() || filter == "media" || filter == "input") {
+        qDebug() << "\n📺 3. 输入源模块测试";
+        qDebug() << "----------------------------------------";
+        
+        qDebug() << "\n📁 3.1 输入源测试";
+        {
+            TestInputSource inputTest;
+            int inputResult = QTest::qExec(&inputTest, argc, argv);
+            result += inputResult;
+            
+            if (inputResult == 0) {
+                qDebug() << "   ✅ 输入源模块全部通过";
+            } else {
+                qDebug() << "   ❌ 输入源模块有" << inputResult << "个失败";
+            }
+        }
+    }
 #else
     if (filter.isEmpty() || filter == "media") {
-        qDebug() << "\n⚠️  2. Frame Allocator模块测试";
+        qDebug() << "\n⚠️  2-3. 媒体模块测试";
         qDebug() << "----------------------------------------";
-        qDebug() << "FFmpeg不可用，跳过Frame Allocator测试";
+        qDebug() << "FFmpeg不可用，跳过Frame Allocator和输入源测试";
         qDebug() << "要启用此测试，请确保：";
         qDebug() << "1. 安装FFmpeg开发库";
         qDebug() << "2. 在CMakeLists.txt中正确配置FFmpeg路径";
@@ -100,8 +120,9 @@ int main(int argc, char *argv[])
         
 #ifdef FFMPEG_AVAILABLE
         qDebug() << "🎬 FFmpeg Frame Allocator: ✅ 启用并测试通过";
+        qDebug() << "📺 输入源模块: ✅ 启用并测试通过";
 #else
-        qDebug() << "🎬 FFmpeg Frame Allocator: ⚠️  未启用";
+        qDebug() << "🎬 FFmpeg相关模块: ⚠️  未启用";
 #endif
         
     } else {
@@ -118,7 +139,9 @@ int main(int argc, char *argv[])
     qDebug() << "📖 使用说明：";
     qDebug() << "   ./run_tests           # 运行所有测试";
     qDebug() << "   ./run_tests memory    # 只运行内存池测试";
-    qDebug() << "   ./run_tests media     # 只运行Frame Allocator测试";
+    qDebug() << "   ./run_tests media     # 运行所有媒体模块测试";
+    qDebug() << "   ./run_tests allocator # 只运行Frame Allocator测试";
+    qDebug() << "   ./run_tests input     # 只运行输入源测试";
     
     return result;
 }

@@ -26,11 +26,7 @@ void TestInputSource::initTestCase()
 
 void TestInputSource::cleanupTestCase()
 {
-    // 清理测试文件
-    if (!test_file_path_.isEmpty()) {
-        removeTestFile(test_file_path_);
-    }
-    
+    qDebug() << "🛡️  安全模式：不删除任何文件";
     qDebug() << "✅ 测试环境清理完成";
     qDebug() << "==========================================";
 }

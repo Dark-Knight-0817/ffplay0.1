@@ -39,16 +39,16 @@ enum class InputSourceState {
  * @brief 输入源信息
  */
 struct InputSourceInfo {
-    InputSourceType type = InputSourceType::Unknown;
-    std::string url;
-    int64_t duration = -1;           // 时长（微秒），-1表示未知
+    InputSourceType type = InputSourceType::Unknown; // 输入源类型
+    std::string url;                 // 输入源地址
+    int64_t duration = -1;           // 时长（微秒），-1表示未知. int64_t 是跨平台统一 8 字整型
     int64_t bit_rate = 0;            // 总码率
     int64_t file_size = 0;           // 文件大小（字节）
     bool is_seekable = false;        // 是否支持seek
     std::string format_name;         // 格式名称
     
     // 网络流特有信息
-    int connection_timeout = 10000;  // 连接超时（毫秒）
+    int connection_timeout = 10000;  // 连接超时（毫秒）, 默认10 s
     std::string transport_protocol;  // 传输协议（tcp/udp）
     
     bool isValid() const {
@@ -67,7 +67,7 @@ public:
     
     // 状态回调函数类型
     using StateCallback = std::function<void(InputSourceState, const std::string&)>;
-    
+
     /**
      * @brief 打开输入源
      * @param url 输入源地址

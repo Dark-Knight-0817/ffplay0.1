@@ -113,11 +113,12 @@ set(MAIN_SOURCES
 # src/memory/ 目录下的内存管理模块
 # 使用 file(GLOB) 或手动列出，推荐手动列出（更明确）
 set(MEMORY_SOURCES
-    src/memory/memory_pool.cpp
-    # 如果你有其他memory模块的.cpp文件，在这里添加
-    # src/memory/memory_manager.cpp
-    # src/memory/cache_manager.cpp
-    # 等等...
+    src/memory/memory_pool.cpp           # 已有
+    # src/memory/cache_manager.cpp         # 添加
+    # src/memory/memory_manager.cpp        # 添加
+    # src/memory/memory_tracker.cpp        # 添加
+    # src/memory/object_pool.cpp           # 添加
+    # src/memory/smart_pointers.cpp        # 添加
 )
 
 # 注意：.h头文件不需要在这里列出，CMake会自动处理
@@ -128,21 +129,21 @@ set(MEMORY_SOURCES
 #     src/core/xxx.cpp
 # )
 
-# set(MEDIA_SOURCES
-#     src/media/xxx.cpp
-# )
+set(MEDIA_SOURCES
+    src/media/input/input_source.cpp
+    src/media/input/file_input.cpp      # 添加这行
+    src/media/input/rtsp_input.cpp  
+)
 
-# set(UTILS_SOURCES
-#     src/utils/xxx.cpp
-# )
+set(UTILS_SOURCES
+    src/utils/network_detector.cpp
+)
 
 # src/media/allocator/ 目录下的帧分配器模块
 set(FRAME_ALLOCATOR_SOURCES
-    # 抽象层 - 只有实现文件需要编译
-    src/media/allocator/frame_allocator_factory.cpp
-    
-    # FFmpeg后端 - 有FFmpeg才编译  
-    src/media/allocator/ffmpeg_allocator/ffmpeg_frame_allocator.cpp
+    src/media/allocator/frame_allocator_factory.cpp     # 已有
+    src/media/allocator/ffmpeg_allocator/ffmpeg_frame_allocator.cpp  # 已有
+    # src/media/allocator/ffmpeg_allocator/packet_recycler.cpp         # 添加
 )
 
 # 检查是否确实存在这些源文件
@@ -158,8 +159,8 @@ set(ALL_SOURCES
     ${MEMORY_SOURCES}
     ${FRAME_ALLOCATOR_SOURCES}
     # ${CORE_SOURCES}      # 当你有这些文件时取消注释
-    # ${MEDIA_SOURCES}
-    # ${UTILS_SOURCES}
+    ${MEDIA_SOURCES}
+    ${UTILS_SOURCES}
 )
 
 # 输出调试信息，看看找到了哪些源文件

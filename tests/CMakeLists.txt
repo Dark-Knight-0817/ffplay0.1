@@ -31,10 +31,12 @@ if(FFMPEG_FOUND OR FFMPEG_LIBRARIES)
         ../src/media/allocator/frame_allocator_factory.cpp
         ../src/media/allocator/ffmpeg_allocator/ffmpeg_frame_allocator.cpp
         
-        # 输入源模块 (新增)
+        # 输入源模块
         ../src/media/input/input_source.cpp
         ../src/media/input/file_input.cpp
         ../src/media/input/rtsp_input.cpp
+        # 工具模块 - 添加这行！
+        ../src/utils/network_detector.cpp   
     )
     
     message(STATUS "  包含模块: Frame Allocator + 输入源")

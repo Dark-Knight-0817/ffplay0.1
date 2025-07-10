@@ -1,6 +1,8 @@
 #include "rtsp_input.h"
+#include "utils/network_detector.h"  // 添加这个头文件
 #include <iostream>
 #include <sstream>
+#include <future>              // 添加用于 std::async
 
 extern "C"
 {
@@ -14,6 +16,10 @@ namespace media
     {
         // 确保网络模块已初始化
         avformat_network_init();
+        last_packet_time_ = std::chrono::steady_clock::now();  // 初始化时间戳
+
+        // 在构造函数体中初始化（此时有完整定义）
+        network_detector_ = std::make_unique<NetworkDetector>();
     }
 
     RTSPInput::~RTSPInput()
@@ -26,6 +32,12 @@ namespace media
     bool RTSPInput::open(const std::string &url)
     {
         std::cout << "RTSPInput::open() 开始，URL: " << url << std::endl;
+        
+        // 预检查网络连通性
+        if (!preCheckNetworkConnectivity(url)) {
+            std::cout << "RTSPInput::open() 失败：网络预检查未通过" << std::endl;
+            return false;
+        }
         
         // 检查状态（避免在锁内调用 changeState）
         {
@@ -65,14 +77,6 @@ namespace media
             changeState(InputSourceState::Error, error_msg);
             return false;
         }
-
-        // 添加更严格的超时控制
-        av_dict_set(&options, "timeout", "3000000", 0);       // 3秒连接超时（微秒）
-        av_dict_set(&options, "stimeout", "3000000", 0);      // 3秒socket超时
-        av_dict_set(&options, "rw_timeout", "3000000", 0);    // 3秒读写超时
-        av_dict_set(&options, "rtsp_transport", "tcp", 0);    // 强制使用TCP
-        av_dict_set(&options, "analyzeduration", "500000", 0); // 0.5秒分析时间
-        av_dict_set(&options, "probesize", "500000", 0);      // 500KB探测大小
 
         // 格式化URL
         std::string final_url = formatRTSPUrl(url);
@@ -233,12 +237,12 @@ namespace media
         // 连接设置
         av_dict_set(options, "rtsp_transport", "tcp", 0);     // 强制TCP（更可靠）
         av_dict_set(options, "rtsp_flags", "prefer_tcp", 0);  // 优先TCP
-        av_dict_set(options, "buffer_size", "1048576", 0);    // 1MB缓冲区
+        av_dict_set(options, "buffer_size", "1048576", 0);    // 1MB缓冲区,网络接收缓冲区大小,减少网络抖动的影响
         
         // 性能优化
-        av_dict_set(options, "analyzeduration", "500000", 0); // 0.5秒分析
-        av_dict_set(options, "probesize", "500000", 0);       // 500KB探测
-        av_dict_set(options, "max_delay", "500000", 0);       // 最大延迟0.5秒
+        av_dict_set(options, "analyzeduration", "500000", 0); // 0.5秒分析,减少可以加快连接速度，但可能获取不完整的流信息
+        av_dict_set(options, "probesize", "500000", 0);       // 500KB探测,较小值可以减少延迟但可能影响稳定性
+        av_dict_set(options, "max_delay", "500000", 0);       // 最大延迟0.5秒,较小值可以减少延迟但可能影响稳定性
         
         // 错误恢复
         av_dict_set(options, "reconnect", "1", 0);            // 允许重连
@@ -247,6 +251,184 @@ namespace media
         av_dict_set(options, "reconnect_delay_max", "2", 0);  // 最大重连延迟2秒
         
         return true;
+    }
+
+    bool RTSPInput::preCheckNetworkConnectivity(const std::string& url) {
+        std::cout << "RTSPInput: 开始网络连通性预检查..." << std::endl;
+        
+        // 解析URL
+        UrlInfo url_info = NetworkDetector::parseUrl(url);
+        if (!url_info.is_valid) {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            last_error_ = "无效的RTSP URL格式";
+            changeState(InputSourceState::Error, last_error_);
+            return false;
+        }
+
+        // 快速socket连接测试
+        NetworkTestResult socket_result = network_detector_->testSocketConnection(
+            url_info.hostname, url_info.port, 3000);
+        
+        if (socket_result.success) {
+            std::cout << "RTSPInput: Socket连接测试成功 (" 
+                      << socket_result.response_time_ms << "ms)" << std::endl;
+            return true;
+        }
+
+        std::cout << "RTSPInput: Socket连接失败，尝试ping测试..." << std::endl;
+        
+        // 如果socket失败，尝试ping测试
+        NetworkTestResult ping_result = network_detector_->testPing(url_info.hostname, 3000);
+        
+        if (ping_result.success) {
+            std::cout << "RTSPInput: Ping测试成功但端口不通 (" 
+                      << ping_result.response_time_ms << "ms)" << std::endl;
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            last_error_ = "网络连通但RTSP服务不可达 (端口" + std::to_string(url_info.port) + "不通)";
+            changeState(InputSourceState::Error, last_error_);
+            return false;
+        }
+
+        std::cout << "RTSPInput: 网络连通性测试完全失败" << std::endl;
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        last_error_ = "网络不可达: " + socket_result.error_message;
+        changeState(InputSourceState::Error, last_error_);
+        return false;
+    }
+
+    void RTSPInput::monitorConnection(){
+        while(!should_stop_monitor_.load()){
+            std::this_thread::sleep_for(std::chrono::seconds(5));   // 心跳 5s 一次
+            if(should_stop_monitor_.load()){    // 双重检查停止标志（优化）
+                break;
+            }
+            
+            // 使用增强的连接检测，而不是简单的 testConnection()
+            if(!testConnectionEnhanced()){
+                std::lock_guard<std::mutex> lock(state_mutex_);
+                if(state_ == InputSourceState::Opened || state_ == InputSourceState::Reading){
+                    connection_lost_.store(true);
+                    changeState(InputSourceState::Disconnected, "RTSP连接丢失");
+                }
+                break;
+            }
+        }
+    }
+
+    bool RTSPInput::testConnection(){
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        if(!format_ctx_ || state_ != InputSourceState::Opened){
+            return false;            
+        }
+
+        // 基础FFmpeg状态检查
+        if (!format_ctx_->pb || format_ctx_->pb->error != 0) {
+            return false;
+        }
+
+        // 这里可以实现更复杂的连接检测逻辑
+        // 例如发送RTSP PING 请求或尝试读取数据
+        return true;
+    }
+
+    bool RTSPInput::testConnectionEnhanced() {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        
+        if (!format_ctx_ || state_ != InputSourceState::Opened) {
+            return false;
+        }
+        
+        // 1. 基础FFmpeg状态检查
+        if (!format_ctx_->pb || format_ctx_->pb->error != 0) {
+            return false;
+        }
+        
+        // 2. 检查最后收到数据的时间
+        auto now = std::chrono::steady_clock::now();
+        auto time_since_last_packet = now - last_packet_time_;
+        
+        if (time_since_last_packet > std::chrono::seconds(30)) {
+            // 30秒没有数据包，尝试读取验证
+            if (!quickReadTest()) {
+                // 读取失败，进行网络层诊断
+                return performNetworkDiagnosis();
+            }
+        }
+        
+        return true;
+    }
+
+    bool RTSPInput::quickReadTest() {
+        if (!format_ctx_) {
+            return false;
+        }
+        
+        AVPacket* packet = av_packet_alloc();  // 新的方式 - 返回指针
+        if (!packet) {
+            return false;
+        }
+        
+        // 设置非阻塞模式
+        int old_flags = format_ctx_->flags;
+        format_ctx_->flags |= AVFMT_FLAG_NONBLOCK;
+        
+        int ret = av_read_frame(format_ctx_, packet);
+        
+        // 恢复原始标志
+        format_ctx_->flags = old_flags;
+        
+        if (ret >= 0) {
+            av_packet_free(&packet);
+            last_packet_time_ = std::chrono::steady_clock::now();
+            return true;
+        }
+        
+        av_packet_free(&packet);  // 释放时需要传递地址
+        return ret == AVERROR(EAGAIN);
+    }
+
+    bool RTSPInput::performNetworkDiagnosis() {
+        if (!format_ctx_ || !format_ctx_->url) {
+            return false;
+        }
+        
+        std::string url = format_ctx_->url;
+        
+        // 异步进行网络诊断，避免阻塞监控线程
+        auto future = std::async(std::launch::async, [this, url]() {
+            UrlInfo url_info = NetworkDetector::parseUrl(url);
+            if (!url_info.is_valid) {
+                return;
+            }
+            
+            // 测试socket连接
+            NetworkTestResult socket_result = network_detector_->testSocketConnection(
+                url_info.hostname, url_info.port, 2000);
+            
+            if (socket_result.success) {
+                std::cout << "RTSPInput: 网络诊断 - Socket连接正常，可能是应用层问题" << std::endl;
+            } else {
+                // 测试ping
+                NetworkTestResult ping_result = network_detector_->testPing(url_info.hostname, 2000);
+                if (ping_result.success) {
+                    std::cout << "RTSPInput: 网络诊断 - 网络层正常，RTSP端口不通" << std::endl;
+                } else {
+                    std::cout << "RTSPInput: 网络诊断 - 网络层断开" << std::endl;
+                }
+            }
+        });
+
+        // 可以选择等待或不等待
+        // future.wait();  // 如果需要等待完成
+        
+        return false;  // 诊断期间认为连接有问题
+    }
+
+    // 新增方法：检查连接健康状态
+    bool RTSPInput::isConnectionHealthy() const {
+        auto now = std::chrono::steady_clock::now();
+        auto silence = now - last_packet_time_;
+        return silence < std::chrono::seconds(30);  // 30秒内有数据认为健康
     }
 
     void RTSPInput::changeState(InputSourceState new_state, const std::string &message){
@@ -269,10 +451,10 @@ namespace media
 
     void RTSPInput::startConnectionMonitor(){
         should_stop_monitor_.store(false);
-        monitor_thread_ = std::thread(
+        monitor_thread_ = std::thread(      // 创建新线程
             [this]()
             {
-                monitorConnection();
+                monitorConnection();        // 在新线程中运行连接监控
             });
     }
 
@@ -281,35 +463,6 @@ namespace media
         if(monitor_thread_.joinable()){
             monitor_thread_.join();
         }
-    }
-
-    void RTSPInput::monitorConnection(){
-        while(!should_stop_monitor_.load()){
-            std::this_thread::sleep_for(std::chrono::seconds(5));
-            if(should_stop_monitor_.load()){
-                break;
-            }
-            // 简单的连接检测,尝试读取一个包
-            if(!testConnection()){
-                std::lock_guard<std::mutex> lock(state_mutex_);
-                if(state_ == InputSourceState::Opened || state_ == InputSourceState::Reading){
-                    connection_lost_.store(true);
-                    changeState(InputSourceState::Disconnected, "RTSP连接丢失");
-                }
-                break;
-            }
-        }
-    }
-
-    bool RTSPInput::testConnection(){
-        std::lock_guard<std::mutex> lock(state_mutex_);
-        if(!format_ctx_ || state_ != InputSourceState::Opened){
-            return false;            
-        }
-
-        // 这里可以实现更复杂的连接检测逻辑
-        // 例如发送RTSP PING 请求或尝试读取数据
-        return true;
     }
 
     std::string RTSPInput::formatRTSPUrl(const std::string& base_url){
@@ -328,6 +481,60 @@ namespace media
         std::string rest = base_url.substr(protocol_pos + 3);
 
         return protocol + username_ + ":" + password_ + "@" + rest;
+    }
+
+    // 新增方法：获取网络诊断信息
+    std::string RTSPInput::getNetworkDiagnosticInfo() const {
+        if (!format_ctx_ || !format_ctx_->url) {
+            return "无法获取网络诊断信息";
+        }
+        
+        std::string url = format_ctx_->url;
+        UrlInfo url_info = NetworkDetector::parseUrl(url);
+        
+        if (!url_info.is_valid) {
+            return "URL格式无效";
+        }
+        
+        std::ostringstream oss;
+        oss << "网络诊断信息:\n";
+        oss << "主机: " << url_info.hostname << "\n";
+        oss << "端口: " << url_info.port << "\n";
+        
+        // 同步进行快速测试
+        NetworkDetector detector;
+        NetworkTestResult result = detector.comprehensiveTest(url, 3000);
+        
+        oss << "连通性: " << (result.success ? "正常" : "异常") << "\n";
+        oss << "响应时间: " << result.response_time_ms << "ms\n";
+        oss << "测试方法: " << result.method_used << "\n";
+        
+        if (!result.success) {
+            oss << "错误信息: " << result.error_message;
+        }
+        
+        return oss.str();
+    }
+
+    // 新增方法：手动触发网络测试
+    bool RTSPInput::manualNetworkTest() {
+        if (!format_ctx_ || !format_ctx_->url) {
+            return false;
+        }
+        
+        std::string url = format_ctx_->url;
+        NetworkTestResult result = network_detector_->comprehensiveTest(url, 5000);
+        
+        std::cout << "手动网络测试结果: " 
+                  << (result.success ? "成功" : "失败") 
+                  << " (" << result.response_time_ms << "ms, " 
+                  << result.method_used << ")" << std::endl;
+        
+        if (!result.success) {
+            std::cout << "错误信息: " << result.error_message << std::endl;
+        }
+        
+        return result.success;
     }
 
 }// namespace media
